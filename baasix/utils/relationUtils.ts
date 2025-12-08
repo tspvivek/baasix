@@ -1,0 +1,626 @@
+import { relations, type InferSelectModel, sql } from 'drizzle-orm';
+import { pgTable } from 'drizzle-orm/pg-core';
+import { getDatabase } from './db.js';
+import type { AssociationType, AssociationDefinition, RelationalResult } from '../types/index.js';
+import type ItemsService from '../services/ItemsService.js';
+
+/**
+ * Relation builder for dynamic schemas
+ */
+export class RelationBuilder {
+  private relationsMap: Map<string, Record<string, AssociationDefinition>> = new Map();
+
+  /**
+   * Store association definitions for a table
+   * Relations will be resolved at query time using Drizzle's query API
+   * Note: This merges with existing associations instead of replacing them
+   */
+  storeAssociations(
+    tableName: string,
+    associations: Record<string, AssociationDefinition>
+  ): void {
+    console.log(`[RelationBuilder] Storing associations for ${tableName}:`, Object.keys(associations));
+
+    // Get existing associations for this table
+    const existing = this.relationsMap.get(tableName) || {};
+
+    // Merge new associations with existing ones
+    const merged = { ...existing, ...associations };
+
+    console.log(`[RelationBuilder] After merge, ${tableName} has:`, Object.keys(merged));
+    this.relationsMap.set(tableName, merged);
+  }
+
+  /**
+   * Get associations for a table
+   */
+  getAssociations(tableName: string): Record<string, AssociationDefinition> | undefined {
+    const assocs = this.relationsMap.get(tableName);
+    console.log(`[RelationBuilder] Retrieved associations for ${tableName}:`, assocs ? Object.keys(assocs) : 'none');
+    return assocs;
+  }
+
+  /**
+   * Get all associations
+   */
+  getAllAssociations(): Map<string, Record<string, AssociationDefinition>> {
+    return this.relationsMap;
+  }
+
+  /**
+   * Get foreign key column name for a relation
+   */
+  getForeignKey(assoc: AssociationDefinition, defaultKey?: string): string {
+    return assoc.foreignKey || defaultKey || `${assoc.model.toLowerCase()}Id`;
+  }
+
+  /**
+   * Check if an association is a one-to-many type
+   */
+  isOneToMany(assoc: AssociationDefinition): boolean {
+    return assoc.type === 'HasMany';
+  }
+
+  /**
+   * Check if an association is a many-to-one type
+   */
+  isManyToOne(assoc: AssociationDefinition): boolean {
+    return assoc.type === 'BelongsTo';
+  }
+
+  /**
+   * Check if an association is a many-to-many type
+   */
+  isManyToMany(assoc: AssociationDefinition): boolean {
+    return assoc.type === 'BelongsToMany';
+  }
+}
+
+/**
+ * Singleton instance
+ */
+export const relationBuilder = new RelationBuilder();
+
+/**
+ * Helper to create foreign key constraint SQL
+ */
+export function createForeignKeySQL(
+  tableName: string,
+  columnName: string,
+  referencedTable: string,
+  referencedColumn: string = 'id',
+  onDelete: string = 'CASCADE',
+  onUpdate: string = 'CASCADE'
+): string {
+  const constraintName = `fk_${tableName}_${columnName}`;
+  
+  return `
+    ALTER TABLE "${tableName}"
+    ADD CONSTRAINT "${constraintName}"
+    FOREIGN KEY ("${columnName}")
+    REFERENCES "${referencedTable}"("${referencedColumn}")
+    ON DELETE ${onDelete}
+    ON UPDATE ${onUpdate}
+  `.trim();
+}
+
+/**
+ * Helper to check if a field is a polymorphic relation
+ */
+export function isPolymorphicRelation(assoc: AssociationDefinition): boolean {
+  return assoc.type === 'M2A' || assoc.polymorphic === true;
+}
+
+/**
+ * Helper to get polymorphic field names
+ */
+export function getPolymorphicFields(
+  relationName: string
+): { typeField: string; idField: string } {
+  return {
+    typeField: `${relationName}Type`,
+    idField: `${relationName}Id`,
+  };
+}
+
+/**
+ * Build junction table for many-to-many relations
+ * Example: UserRoles for User <-> Role
+ */
+export function buildJunctionTable(
+  table1Name: string,
+  table2Name: string,
+  table1Key: string = 'id',
+  table2Key: string = 'id'
+): string {
+  const junctionName = `${table1Name}${table2Name}`;
+  const fk1 = `${table1Name}${table1Key.charAt(0).toUpperCase()}${table1Key.slice(1)}`;
+  const fk2 = `${table2Name}${table2Key.charAt(0).toUpperCase()}${table2Key.slice(1)}`;
+
+  return `
+    CREATE TABLE IF NOT EXISTS "${junctionName}" (
+      "${fk1}" UUID NOT NULL,
+      "${fk2}" UUID NOT NULL,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY ("${fk1}", "${fk2}"),
+      FOREIGN KEY ("${fk1}") REFERENCES "${table1Name}"("${table1Key}") ON DELETE CASCADE,
+      FOREIGN KEY ("${fk2}") REFERENCES "${table2Name}"("${table2Key}") ON DELETE CASCADE
+    )
+  `.trim();
+}
+
+/**
+ * Convert Sequelize association type to Drizzle relation type
+ */
+export function sequelizeTosDrizzleRelationType(
+  sequelizeType: string
+): 'one' | 'many' | null {
+  switch (sequelizeType) {
+    case 'HasMany':
+    case 'BelongsToMany':
+      return 'many';
+    case 'HasOne':
+    case 'BelongsTo':
+      return 'one';
+    default:
+      return null;
+  }
+}
+
+// ============================================================================
+// Relational Data Processing
+// ============================================================================
+
+/**
+ * Process relational data - extract nested objects/arrays
+ * @param collection - Collection name
+ * @param data - Data to process
+ * @param service - Service instance
+ * @param ItemsServiceClass - ItemsService class for creating related service instances
+ */
+export async function processRelationalData(
+  collection: string,
+  data: Record<string, any>,
+  service: any,
+  ItemsServiceClass: typeof ItemsService
+): Promise<RelationalResult> {
+  console.log(`[RelationUtils] Processing relational data for ${collection}`);
+
+  const result: Record<string, any> = {};
+  const deferredHasMany: any[] = [];
+  const deferredM2M: any[] = [];
+  const deferredM2A: any[] = [];
+
+  // Get relation metadata for this collection
+  const associations = relationBuilder.getAssociations(collection);
+
+  console.log(`[RelationUtils] Associations for ${collection}:`, associations ? Object.keys(associations) : 'none');
+
+  if (!associations) {
+    // No relations defined, return data as-is
+    console.log(`[RelationUtils] No associations found for ${collection}, returning data as-is`);
+    return {
+      result: { ...data },
+      deferredHasMany,
+      deferredM2M,
+      deferredM2A
+    };
+  }
+
+  // Process BelongsTo relationships first - they need to be created/resolved before main record
+  for (const [key, value] of Object.entries(data)) {
+    const association = associations[key];
+
+    if (!association || value == null) {
+      // Not a relation or value is null - include in result
+      result[key] = value;
+      continue;
+    }
+
+    if (association.type === 'BelongsTo') {
+      console.log(`[RelationUtils] Processing BelongsTo relation: ${key}`);
+
+      // Use passed ItemsService class to create related service
+      const relatedService = new ItemsServiceClass(association.model, {
+        accountability: service.accountability,
+        tenant: service.tenant
+      });
+
+      const foreignKey = association.foreignKey || `${key}_Id`;
+
+      if (typeof value === 'object' && !value.id) {
+        // Create new related record
+        console.log(`[RelationUtils] Creating new ${association.model} for ${key}`);
+        const newRelatedId = await relatedService.createOne(value, { bypassPermissions: true });
+        console.log(`[RelationUtils] Created ${association.model} with ID:`, newRelatedId);
+        console.log(`[RelationUtils] Setting ${foreignKey} =`, newRelatedId);
+        result[foreignKey] = newRelatedId;
+      } else if (typeof value === 'object' && value.id) {
+        // Reference existing record (optionally update it)
+        console.log(`[RelationUtils] Using existing ${association.model} ${value.id} for ${key}`);
+
+        // If there are other fields besides id, update the related record
+        const updateFields = { ...value };
+        delete updateFields.id;
+
+        if (Object.keys(updateFields).length > 0) {
+          await relatedService.updateOne(value.id, updateFields, { bypassPermissions: true });
+        }
+
+        result[foreignKey] = value.id;
+      } else {
+        // Use existing record ID directly
+        result[foreignKey] = value;
+      }
+
+      // Don't include the relation name in result (we stored the foreignKey instead)
+      // delete result[key]; - already not added
+    } else {
+      // Not a BelongsTo - include in result for now, process later
+      result[key] = value;
+    }
+  }
+
+  // Process HasMany, BelongsToMany, and M2A relationships - these are deferred
+  for (const [key, value] of Object.entries(data)) {
+    const association = associations[key];
+
+    if (!association || value == null) continue;
+
+    // Check for M2A (polymorphic) relations first
+    // M2A is stored as HasMany with polymorphic: true
+    if (isPolymorphicRelation(association)) {
+      if (Array.isArray(value)) {
+        console.log(`[RelationUtils] Deferring M2A relation: ${key}`);
+        deferredM2A.push({ association: key, associationInfo: association, value });
+      }
+      // Remove from result
+      delete result[key];
+    } else if (association.type === 'HasMany') {
+      if (Array.isArray(value)) {
+        console.log(`[RelationUtils] Deferring HasMany relation: ${key}`);
+        deferredHasMany.push({ association: key, associationInfo: association, value });
+      }
+      // Remove from result
+      delete result[key];
+    } else if (association.type === 'BelongsToMany') {
+      if (Array.isArray(value)) {
+        console.log(`[RelationUtils] Deferring BelongsToMany relation: ${key}`);
+        deferredM2M.push({ association: key, associationInfo: association, value });
+      }
+      // Remove from result
+      delete result[key];
+    }
+  }
+
+  console.log(`[RelationUtils] Processed relational data:`, {
+    resultKeys: Object.keys(result),
+    deferredHasManyCount: deferredHasMany.length,
+    deferredM2MCount: deferredM2M.length,
+    deferredM2ACount: deferredM2A.length
+  });
+
+  return {
+    result,
+    deferredHasMany,
+    deferredM2M,
+    deferredM2A
+  };
+}
+
+/**
+ * Handle HasMany relationship after main record is created
+ *
+ * @param item - The created/updated main record with its ID
+ * @param association - Name of the association
+ * @param associationInfo - Metadata about the association
+ * @param value - Array of related items to create/update
+ * @param service - The service instance
+ * @param ItemsServiceClass - ItemsService class for creating related service instances
+ * @param transaction - Optional transaction
+ */
+export async function handleHasManyRelationship(
+  item: any,
+  association: string,
+  associationInfo: any,
+  value: any[],
+  service: any,
+  ItemsServiceClass: typeof ItemsService,
+  transaction?: any
+): Promise<void> {
+  console.log(`[RelationUtils] Handling HasMany relationship: ${association}`);
+
+  if (!Array.isArray(value)) {
+    console.warn(`[RelationUtils] HasMany value is not an array for ${association}`);
+    return;
+  }
+
+  // Use passed ItemsService class to create related service
+  const relatedService = new ItemsServiceClass(associationInfo.model, {
+    accountability: service.accountability,
+    tenant: service.tenant
+  });
+
+  const foreignKey = associationInfo.foreignKey || `${service.collection.toLowerCase()}_Id`;
+  const parentId = item[service.primaryKey];
+
+  // Get existing related records
+  const existingRecordsResult = await relatedService.readByQuery({
+    filter: { [foreignKey]: { eq: parentId } }
+  }, true); // bypassPermissions
+
+  const existingRecords = existingRecordsResult.data || [];
+
+  // Create a set of existing IDs
+  const existingIds = new Set(existingRecords.map((record: any) => record.id));
+
+  // Create a set of IDs from the update value
+  const updateIds = new Set(value.filter(item => item.id).map(item => item.id));
+
+  // Find records to delete or unlink
+  const idsToDelete = [...existingIds].filter(id => !updateIds.has(id));
+
+  if (idsToDelete.length > 0) {
+    console.log(`[RelationUtils] Removing ${idsToDelete.length} orphaned HasMany records`);
+
+    // TODO: Check if foreign key is nullable
+    // For now, assume we should delete orphaned records
+    await Promise.all(
+      idsToDelete.map(async (id) => {
+        await relatedService.deleteOne(id, { bypassPermissions: true, transaction });
+      })
+    );
+  }
+
+  // Create or update the related records
+  await Promise.all(
+    value.map(async (relItem) => {
+      const data = { ...relItem };
+
+      // Set the foreign key to link to parent
+      data[foreignKey] = parentId;
+
+      if (relItem.id) {
+        // Update existing record
+        console.log(`[RelationUtils] Updating HasMany record ${relItem.id} for ${association}`);
+        await relatedService.updateOne(relItem.id, data, { bypassPermissions: true, transaction });
+      } else {
+        // Create new record
+        console.log(`[RelationUtils] Creating new HasMany record for ${association}`);
+        await relatedService.createOne(data, { bypassPermissions: true, transaction });
+      }
+    })
+  );
+
+  console.log(`[RelationUtils] Completed HasMany relationship: ${association}`);
+}
+
+/**
+ * Handle M2M (BelongsToMany) relationship after main record is created
+ *
+ * @param item - The created/updated main record with its ID
+ * @param association - Name of the association
+ * @param associationInfo - Metadata about the association
+ * @param value - Array of related items (IDs or objects with IDs)
+ * @param service - The service instance
+ * @param ItemsServiceClass - ItemsService class for creating related service instances
+ * @param transaction - Optional transaction
+ */
+export async function handleM2MRelationship(
+  item: any,
+  association: string,
+  associationInfo: any,
+  value: any[],
+  service: any,
+  ItemsServiceClass: typeof ItemsService,
+  transaction?: any
+): Promise<void> {
+  console.log(`[RelationUtils] Handling M2M relationship: ${association}`);
+
+  if (!Array.isArray(value)) {
+    console.warn(`[RelationUtils] M2M value is not an array for ${association}`);
+    return;
+  }
+
+  // Use statically imported getDatabase and sql
+  const db = getDatabase();
+
+  // Use transaction if provided, otherwise use db
+  const dbOrTx = transaction || db;
+
+  // Get junction table name from association metadata
+  const junctionTable = associationInfo.through || `${service.collection}_${associationInfo.model}_junction`;
+  console.log(`[RelationUtils] Using junction table: ${junctionTable}`);
+
+  // Define foreign key column names
+  const sourceKey = associationInfo.foreignKey || `${service.collection}_id`;
+  const targetKey = associationInfo.otherKey || `${associationInfo.model}_id`;
+  const parentId = item[service.primaryKey];
+
+  console.log(`[RelationUtils] M2M keys: sourceKey=${sourceKey}, targetKey=${targetKey}, parentId=${parentId}`);
+
+  // Process value array - create any new related records first
+  const processedIds: any[] = [];
+
+  for (const targetItem of value) {
+    if (typeof targetItem === 'object' && targetItem !== null) {
+      if (targetItem.id) {
+        // Existing record - just use the ID
+        processedIds.push(targetItem.id);
+      } else {
+        // New record - create it first using passed ItemsService class
+        const relatedService = new ItemsServiceClass(associationInfo.model, {
+          accountability: service.accountability,
+          tenant: service.tenant
+        });
+
+        console.log(`[RelationUtils] Creating new ${associationInfo.model} for M2M relation`);
+        const newId = await relatedService.createOne(targetItem, { bypassPermissions: true, transaction });
+        processedIds.push(newId);
+      }
+    } else {
+      // Direct ID
+      processedIds.push(targetItem);
+    }
+  }
+
+  // Clear existing relations for this record
+  console.log(`[RelationUtils] Clearing existing M2M relations in ${junctionTable}`);
+  await dbOrTx.execute(sql`
+    DELETE FROM "${sql.raw(junctionTable)}"
+    WHERE "${sql.raw(sourceKey)}" = ${parentId}
+  `);
+
+  // Create new junction records
+  if (processedIds.length > 0) {
+    console.log(`[RelationUtils] Creating ${processedIds.length} M2M junction records`);
+
+    for (const targetId of processedIds) {
+      await dbOrTx.execute(sql`
+        INSERT INTO "${sql.raw(junctionTable)}" ("${sql.raw(sourceKey)}", "${sql.raw(targetKey)}")
+        VALUES (${parentId}, ${targetId})
+      `);
+    }
+  }
+
+  console.log(`[RelationUtils] Completed M2M relationship: ${association}`);
+}
+
+/**
+ * Handle M2A (polymorphic) relationship after main record is created
+ *
+ * @param item - The created/updated main record with its ID
+ * @param association - Name of the association
+ * @param associationInfo - Metadata about the association
+ * @param value - Array of polymorphic relation items
+ * @param service - The service instance
+ * @param ItemsServiceClass - ItemsService class (not used in M2A but kept for consistency)
+ * @param transaction - Optional transaction
+ */
+export async function handleM2ARelationship(
+  item: any,
+  association: string,
+  associationInfo: any,
+  value: any[],
+  service: any,
+  ItemsServiceClass: typeof ItemsService,
+  transaction?: any
+): Promise<void> {
+  console.log(`[RelationUtils] Handling M2A relationship: ${association}`);
+
+  if (!Array.isArray(value)) {
+    console.warn(`[RelationUtils] M2A value is not an array for ${association}`);
+    return;
+  }
+
+  // Use statically imported getDatabase and sql
+  const db = getDatabase();
+
+  // Use transaction if provided, otherwise use db
+  const dbOrTx = transaction || db;
+
+  // M2A uses a polymorphic junction table
+  // The junction table name is stored in 'through' property
+  const junctionTable = associationInfo.through;
+  if (!junctionTable) {
+    console.error(`[RelationUtils] M2A relation ${association} missing 'through' property`);
+    return;
+  }
+  console.log(`[RelationUtils] Using M2A junction table: ${junctionTable}`);
+
+  // Define column names for polymorphic relation
+  const sourceKey = `${service.collection}_id`;
+  const targetKey = 'item_id'; // Polymorphic ID field
+  const typeKey = 'collection'; // Polymorphic type field
+  const parentId = item[service.primaryKey];
+
+  console.log(`[RelationUtils] M2A keys: sourceKey=${sourceKey}, targetKey=${targetKey}, typeKey=${typeKey}`);
+
+  // Clear existing relations for this record
+  console.log(`[RelationUtils] Clearing existing M2A relations in ${junctionTable}`);
+  await dbOrTx.execute(sql`
+    DELETE FROM "${sql.raw(junctionTable)}"
+    WHERE "${sql.raw(sourceKey)}" = ${parentId}
+  `);
+
+  // Create new polymorphic junction records
+  if (value.length > 0) {
+    console.log(`[RelationUtils] Creating ${value.length} M2A junction records`);
+
+    for (const item of value) {
+      // Extract the target type and ID
+      const targetType = item.type || item.collection;
+      const targetId = item.item_id || item.item || item.id;
+
+      if (!targetType || !targetId) {
+        console.warn(`[RelationUtils] Skipping invalid M2A item:`, item);
+        continue;
+      }
+
+      console.log(`[RelationUtils] Creating M2A junction: ${sourceKey}=${parentId}, ${typeKey}=${targetType}, ${targetKey}=${targetId}`);
+
+      await dbOrTx.execute(sql`
+        INSERT INTO "${sql.raw(junctionTable)}" ("${sql.raw(sourceKey)}", "${sql.raw(typeKey)}", "${sql.raw(targetKey)}")
+        VALUES (${parentId}, ${targetType}, ${targetId})
+      `);
+    }
+  }
+
+  console.log(`[RelationUtils] Completed M2A relationship: ${association}`);
+}
+
+/**
+ * Handle related records before delete (CASCADE, SET NULL, etc.)
+ * TODO: Full implementation
+ */
+export async function handleRelatedRecordsBeforeDelete(
+  item: any,
+  service: any,
+  transaction?: any
+): Promise<void> {
+  console.log(`[RelationUtils] Would handle related records before delete`);
+}
+
+/**
+ * Validate relational data
+ * TODO: Full implementation
+ */
+export async function validateRelationalData(
+  data: Record<string, any>,
+  collection: string,
+  service: any
+): Promise<void> {
+  console.log(`[RelationUtils] Would validate relational data for ${collection}`);
+}
+
+/**
+ * Resolve circular dependencies in data
+ * TODO: Full implementation
+ */
+export async function resolveCircularDependencies(
+  data: Record<string, any>,
+  collection: string,
+  service: any
+): Promise<{ resolvedData: Record<string, any>; deferredFields: Array<{ field: string; value: any }> }> {
+  console.log(`[RelationUtils] Would resolve circular dependencies for ${collection}`);
+  
+  return {
+    resolvedData: data,
+    deferredFields: []
+  };
+}
+
+/**
+ * Process deferred fields (from circular dependencies)
+ * TODO: Full implementation
+ */
+export async function processDeferredFields(
+  item: any,
+  deferredFields: Array<{ field: string; value: any }>,
+  service: any,
+  transaction?: any
+): Promise<void> {
+  console.log(`[RelationUtils] Would process ${deferredFields.length} deferred fields`);
+  // TODO: If implemented, pass transaction to any service operations
+}

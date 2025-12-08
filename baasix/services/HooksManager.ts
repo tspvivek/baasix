@@ -1,0 +1,270 @@
+import fs from 'fs';
+import path from 'path';
+import { db, getDatabase } from '../utils/db.js';
+import { sql } from 'drizzle-orm';
+import { schemaManager } from '../utils/schemaManager.js';
+import type { HookContext, HookFunction } from '../types/index.js';
+
+// Re-export types for backward compatibility
+export type { HookContext, HookFunction };
+
+/**
+ * Lazy getter for SocketService to avoid circular dependency
+ */
+let _socketService: any = null;
+async function getSocketService() {
+  if (!_socketService) {
+    const module = await import('./SocketService.js');
+    _socketService = module.default;
+  }
+  return _socketService;
+}
+
+/**
+ * Hooks Manager - Executes lifecycle hooks for collections
+ *
+ * Matches Sequelize implementation 1:1
+ */
+
+export class HooksManager {
+  private hooks: Record<string, HookFunction[]> = {};
+
+  /**
+   * Register a hook for a collection and event
+   */
+  registerHook(
+    collection: string,
+    event: string,
+    hookFunction: HookFunction
+  ): void {
+    const key = `${collection}:${event}`;
+    console.info(`Registering hook for ${key}`);
+    
+    if (!this.hooks[key]) {
+      this.hooks[key] = [];
+    }
+    
+    this.hooks[key].push(hookFunction);
+  }
+
+  /**
+   * Get hooks for a collection and event
+   * Returns both specific hooks and wildcard hooks (registered for all collections)
+   */
+  getHooks(collection: string, event: string): HookFunction[] {
+    // Get hooks for specific collection
+    const specificHooks = this.hooks[`${collection}:${event}`] || [];
+    
+    // Get wildcard hooks (registered for all collections with *)
+    const wildcardHooks = this.hooks[`*:${event}`] || [];
+    
+    // Combine both - wildcard hooks execute first
+    return [...wildcardHooks, ...specificHooks];
+  }
+
+  /**
+   * Execute hooks for a collection and action
+   */
+  async executeHooks(
+    collection: string,
+    event: string,
+    accountability: any,
+    context: HookContext
+  ): Promise<HookContext> {
+    const hooks = this.getHooks(collection, event);
+    let modifiedData = { ...context };
+
+    // Execute each hook in sequence
+    for (const hook of hooks) {
+      const result = await hook({
+        collection,
+        accountability,
+        db,
+        ...modifiedData,
+      });
+      
+      // Update modifiedData with hook result if provided
+      if (result) {
+        modifiedData = result;
+      }
+    }
+
+    // Handle socket broadcasts after standard hooks
+    // Only broadcast for items-related events
+    if (event.startsWith('items.') && event.endsWith('.after')) {
+      const action = event.split('.')[1]; // 'create', 'update', or 'delete'
+
+      // Check if socket broadcasting is enabled
+      const shouldBroadcast =
+        process.env.SOCKET_ENABLED === 'true' &&
+        (!process.env.SOCKET_EXCLUDE_COLLECTIONS ||
+          !process.env.SOCKET_EXCLUDE_COLLECTIONS.includes(collection));
+
+      if (shouldBroadcast) {
+        // Use lazy getter for socket service to avoid circular dependencies
+        try {
+          const socketService = await getSocketService();
+          
+          switch (action) {
+            case 'create':
+              if (modifiedData.document) {
+                socketService.broadcastChange(
+                  collection,
+                  'create',
+                  modifiedData.document,
+                  accountability
+                );
+              }
+              break;
+
+            case 'update':
+              if (modifiedData.document) {
+                socketService.broadcastChange(
+                  collection,
+                  'update',
+                  modifiedData.document,
+                  accountability
+                );
+              }
+              break;
+
+            case 'delete':
+              if (modifiedData.id) {
+                socketService.broadcastChange(
+                  collection,
+                  'delete',
+                  { id: modifiedData.id, ...modifiedData.document },
+                  accountability
+                );
+              }
+              break;
+          }
+        } catch (error) {
+          // Socket service not available or disabled
+          console.warn('Socket service not available for broadcasting');
+        }
+      }
+    }
+
+    return modifiedData;
+  }
+
+  /**
+   * Load hooks from extensions directory
+   */
+  async loadHooksFromDirectory(context: any, directory?: string): Promise<void> {
+    if (!directory) {
+      directory = path.join(process.cwd(), 'extensions');
+    }
+
+    if (!fs.existsSync(directory)) {
+      console.warn(`Hooks directory not found: ${directory}`);
+      return;
+    }
+
+    const files = fs.readdirSync(directory);
+
+    for (const file of files) {
+      const filePath = path.join(directory, file);
+
+      if (fs.statSync(filePath).isDirectory() && file.startsWith('baasix-hook-')) {
+        const hookFile = path.join(filePath, 'index.js');
+
+        if (fs.existsSync(hookFile)) {
+          try {
+            // Dynamic import for ES modules
+            const hookModule = await import(hookFile);
+
+            if (typeof hookModule.default === 'function') {
+              await hookModule.default(this, context);
+              console.info(`Loaded hook: ${file}`);
+            }
+          } catch (error) {
+            console.error(`Failed to load hook ${file}:`, error);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Load schedules from extensions directory
+   */
+  async loadSchedulesFromDirectory(context: any, schedule: any, directory?: string): Promise<void> {
+    if (!directory) {
+      directory = path.join(process.cwd(), 'extensions');
+    }
+
+    if (!fs.existsSync(directory)) {
+      console.warn(`Schedules directory not found: ${directory}`);
+      return;
+    }
+
+    const files = fs.readdirSync(directory);
+
+    for (const file of files) {
+      const filePath = path.join(directory, file);
+
+      if (fs.statSync(filePath).isDirectory() && file.startsWith('baasix-schedule-')) {
+        const scheduleFile = path.join(filePath, 'index.js');
+
+        if (fs.existsSync(scheduleFile)) {
+          try {
+            // Dynamic import for ES modules
+            const scheduleModule = await import(scheduleFile);
+
+            if (typeof scheduleModule.default === 'function') {
+              await scheduleModule.default(schedule, context);
+              console.info(`Loaded schedule: ${file}`);
+            }
+          } catch (error) {
+            console.error(`Failed to load schedule ${file}:`, error);
+          }
+        }
+      }
+    }
+  }
+}
+
+// Export singleton instance
+export const hooksManager = new HooksManager();
+
+// Register global beforeCreate hook for auto-sort functionality
+hooksManager.registerHook('*', 'items.create', async (context: HookContext) => {
+  const { data, collection } = context;
+
+  if (!data) {
+    return context;
+  }
+
+  try {
+    // Get the Drizzle table schema (using statically imported schemaManager)
+    const table = schemaManager.getTable(collection);
+
+    // Check if table has a 'sort' column by trying to access it
+    if (table && table.sort) {
+      // If sort is not provided or is null/undefined, auto-increment it
+      if (data.sort === undefined || data.sort === null) {
+        const db = getDatabase();
+
+        // Query for max sort value
+        const result = await db.execute(sql`
+          SELECT COALESCE(MAX("sort"), 0) as max_sort
+          FROM "${sql.raw(collection)}"
+        `);
+
+        const maxSort = result[0]?.max_sort || 0;
+        data.sort = Number(maxSort) + 1;
+        console.log(`[HooksManager] Auto-assigned sort value ${data.sort} for ${collection}`);
+      }
+    }
+  } catch (error) {
+    // If query fails, silently ignore (sort field might not exist)
+    console.warn(`Failed to auto-increment sort for ${collection}:`, error.message);
+  }
+
+  return context;
+});
+
+export default hooksManager;
+

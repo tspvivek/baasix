@@ -1,0 +1,23 @@
+[
+    {
+        "title": "Advanced Node.js",
+        "content": "Deep dive into Node.js internals",
+        "category": { "name": "Technology2", "description": "Tech articles" },
+        "tags": ["nodejs", "backend", "javascript"],
+        "metadata": { "author": "John Doe", "difficulty": "advanced" }
+    },
+    {
+        "title": "React Hooks Guide",
+        "content": "Complete guide to React hooks",
+        "category": { "name": "Frontend2", "description": "Frontend development" },
+        "tags": ["react", "hooks", "javascript"],
+        "metadata": { "author": "Jane Smith", "difficulty": "intermediate" }
+    },
+    {
+        "title": "Database Design",
+        "content": "Best practices for database design",
+        "category": { "name": "Database2", "description": "Database topics" },
+        "tags": ["database", "design", "sql"],
+        "metadata": { "author": "Bob Wilson", "difficulty": "beginner" }
+    }
+]

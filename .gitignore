@@ -1,0 +1,13 @@
+node_modules
+# Keep environment variables out of version control
+codebase.md
+server.md
+dist/
+.env
+.env.production
+.env.test
+
+# Test reports
+test-report.html
+
+baasix/app/
