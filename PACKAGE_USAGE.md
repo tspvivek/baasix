@@ -5,7 +5,7 @@
 ### Installation
 
 ```bash
-npm install @tspvivek/baasix-drizzle
+npm install @tspvivek/baasix
 ```
 
 ### Basic Setup
@@ -13,7 +13,7 @@ npm install @tspvivek/baasix-drizzle
 **1. Create `server.js` in your project:**
 
 ```javascript
-import { startServer } from "@tspvivek/baasix-drizzle";
+import { startServer } from "@tspvivek/baasix";
 
 startServer().catch((error) => {
   console.error("Failed to start server:", error);
@@ -59,7 +59,7 @@ your-project/
 **Extension Example (`extensions/baasix-hook-posts/index.js`):**
 
 ```javascript
-import { ItemsService } from "@tspvivek/baasix-drizzle";
+import { ItemsService } from "@tspvivek/baasix";
 
 export default async (hooksService, context) => {
   hooksService.registerHook("posts", "items.create", async ({ data, accountability }) => {
@@ -88,7 +88,7 @@ npm install
 
 # Link package to itself for development
 npm link
-npm link @tspvivek/baasix-drizzle
+npm link @tspvivek/baasix
 
 # Run development server (uses tsx for TypeScript)
 npm run development
@@ -110,7 +110,7 @@ npm run start
 ### Package Structure
 
 ```
-@tspvivek/baasix-drizzle/
+@tspvivek/baasix/
 ├── dist/                    # Compiled output (published to npm)
 │   ├── index.js             # Main entry point
 │   ├── services/            # All services
@@ -140,13 +140,13 @@ The package exports:
 
 ```javascript
 // Main server
-import { startServer, app } from "@tspvivek/baasix-drizzle";
+import { startServer, app } from "@tspvivek/baasix";
 
 // Services (for extensions)
-import { ItemsService, FilesService, MailService } from "@tspvivek/baasix-drizzle";
+import { ItemsService, FilesService, MailService } from "@tspvivek/baasix";
 
 // Utilities
-import { APIError, env, schemaManager } from "@tspvivek/baasix-drizzle";
+import { APIError, env, schemaManager } from "@tspvivek/baasix";
 ```
 
 ---

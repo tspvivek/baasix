@@ -25,6 +25,24 @@ const registerEndpoint = (app: Express) => {
     }
   });
 
+  // Get settings by app_url (public access)
+  app.get("/settings/by-app-url", async (req, res, next) => {
+    try {
+      const appUrl = req.query.app_url as string;
+
+      if (!appUrl) {
+        throw new APIError("app_url query parameter is required", 400);
+      }
+
+      const settings = await settingsService.getSettingsByAppUrl(appUrl);
+      const sanitizedSettings = settingsService.sanitizeSettings(settings);
+
+      res.json({ data: sanitizedSettings });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Get settings (public access - returns global by default, tenant-specific if available)
   app.get("/settings", async (req, res, next) => {
     try {
@@ -72,20 +90,6 @@ const registerEndpoint = (app: Express) => {
       const sanitized = settingsService.sanitizeSettings(updatedSettings);
 
       res.json({ data: sanitized });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // Get SMTP config (admin only)
-  app.get("/settings/smtp", async (req, res, next) => {
-    try {
-      // TODO: Check admin permission
-      const tenantId = req.accountability?.tenant;
-
-      const smtpConfig = await settingsService.getTenantSMTPConfig(tenantId);
-
-      res.json({ data: smtpConfig });
     } catch (error) {
       next(error);
     }
