@@ -3,18 +3,13 @@ import nodemailer from "nodemailer";
 import { Liquid } from "liquidjs";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 import settingsService from "./SettingsService.js";
-import { db } from "../utils/db.js";
 import type { MailOptions, SenderConfig, TenantTransporter } from '../types/index.js';
 
 // In test environment, use Jest globals, in production use process.cwd() fallback
 const _dirname = typeof __dirname !== 'undefined'
   ? __dirname
   : process.cwd() + '/baasix/services';
-
-// Note: Will need baasix_EmailLog table schema
-// For now, we'll handle this gracefully
 
 class MailService {
   private senders: Record<string, SenderConfig> = {};
@@ -310,29 +305,69 @@ class MailService {
       const info = await transporter.sendMail(mailOptions);
       console.log(`Message sent via ${finalSender}: ${info.messageId}`);
 
-      // Log email sent event (Drizzle adaptation needed)
-      try {
-        // TODO: Import baasix_EmailLog table and use db.insert()
-        // For now, we'll skip logging to avoid errors
-        console.info("Email log entry would be created here");
-      } catch (error) {
-        console.error("Error logging email:", error);
-      }
+      // Log email sent event
+      this.logEmail({
+        email: to,
+        subject,
+        templateName,
+        sender: finalSender,
+        tenantId: tenantId || null,
+        status: "sent",
+        messageId: info.messageId,
+      });
 
       return info;
     } catch (error: any) {
       console.error("Error sending email:", error);
 
       // Log email error event
-      try {
-        // TODO: Import baasix_EmailLog table and use db.insert()
-        console.error("Email error log entry would be created here");
-      } catch (logError) {
-        console.error("Error logging email error:", logError);
-      }
+      this.logEmail({
+        email: to,
+        subject,
+        templateName,
+        sender: finalSender || sender || '',
+        tenantId: tenantId || null,
+        status: "error",
+        errorMessage: error.message,
+      });
 
       throw error;
     }
+  }
+
+  /**
+   * Log email to database asynchronously (fire and forget)
+   */
+  private logEmail(logData: {
+    email: string;
+    subject: string;
+    templateName: string;
+    sender: string;
+    tenantId: string | number | null;
+    status: string;
+    messageId?: string;
+    errorMessage?: string;
+  }): void {
+    // Import ItemsService dynamically to avoid circular dependency
+    import('./ItemsService.js').then(({ default: ItemsService }) => {
+      const emailLogService = new ItemsService('baasix_EmailLog', {
+        accountability: undefined, // System operation, bypass permissions
+      });
+
+      emailLogService.createOne({
+        email: logData.email,
+        subject: logData.subject,
+        templateName: logData.templateName,
+        sender: logData.sender,
+        status: logData.status,
+        messageId: logData.messageId || null,
+        errorMessage: logData.errorMessage || null,
+      }, { bypassPermissions: true }).catch((error: any) => {
+        console.error('Error logging email to database:', error.message);
+      });
+    }).catch((error: any) => {
+      console.error('Error importing ItemsService for email logging:', error.message);
+    });
   }
 }
 

@@ -364,13 +364,30 @@ export async function handleHasManyRelationship(
   if (idsToDelete.length > 0) {
     console.log(`[RelationUtils] Removing ${idsToDelete.length} orphaned HasMany records`);
 
-    // TODO: Check if foreign key is nullable
-    // For now, assume we should delete orphaned records
-    await Promise.all(
-      idsToDelete.map(async (id) => {
-        await relatedService.deleteOne(id, { bypassPermissions: true, transaction });
-      })
-    );
+    // Check if foreign key is nullable by looking at schema
+    const { schemaManager } = await import('./schemaManager.js');
+    const targetSchema = schemaManager.getSchemaDefinition(associationInfo.model);
+    const fkField = targetSchema?.fields?.[foreignKey];
+    const allowsNull = !fkField || fkField.allowNull !== false;
+
+    // For junction tables or non-nullable foreign keys, delete the records
+    // For nullable foreign keys, just set the FK to null (unlink)
+    const isJunctionTable = associationInfo.model.endsWith('_junction');
+
+    if (isJunctionTable || !allowsNull) {
+      await Promise.all(
+        idsToDelete.map(async (id) => {
+          await relatedService.deleteOne(id, { bypassPermissions: true, transaction });
+        })
+      );
+    } else {
+      // Set foreign key to null instead of deleting
+      await Promise.all(
+        idsToDelete.map(async (id) => {
+          await relatedService.updateOne(id, { [foreignKey]: null }, { bypassPermissions: true, transaction });
+        })
+      );
+    }
   }
 
   // Create or update the related records
@@ -572,48 +589,309 @@ export async function handleM2ARelationship(
 
 /**
  * Handle related records before delete (CASCADE, SET NULL, etc.)
- * TODO: Full implementation
+ * Processes HasMany, HasOne, and BelongsToMany relationships based on onDelete settings
  */
 export async function handleRelatedRecordsBeforeDelete(
   item: any,
   service: any,
   transaction?: any
 ): Promise<void> {
-  console.log(`[RelationUtils] Would handle related records before delete`);
+  console.log(`[RelationUtils] Handling related records before delete for ${service.collection}`);
+
+  const associations = relationBuilder.getAssociations(service.collection);
+  if (!associations) {
+    return;
+  }
+
+  const db = getDatabase();
+  const dbOrTx = transaction || db;
+
+  for (const [associationName, association] of Object.entries(associations)) {
+    const onDelete = association.onDelete || 'CASCADE';
+
+    if (association.type === 'HasMany') {
+      await handleHasManyDelete(item, association, associationName, service, dbOrTx, onDelete);
+    } else if (association.type === 'HasOne') {
+      await handleHasOneDelete(item, association, associationName, service, dbOrTx, onDelete);
+    } else if (association.type === 'BelongsToMany') {
+      await handleBelongsToManyDelete(item, association, associationName, service, dbOrTx);
+    } else if (isPolymorphicRelation(association)) {
+      await handleM2ADelete(item, association, associationName, service, dbOrTx);
+    }
+  }
 }
 
 /**
- * Validate relational data
- * TODO: Full implementation
+ * Handle HasMany delete - CASCADE or SET NULL related records
+ */
+async function handleHasManyDelete(
+  item: any,
+  association: AssociationDefinition,
+  associationName: string,
+  service: any,
+  dbOrTx: any,
+  onDelete: string
+): Promise<void> {
+  const { schemaManager } = await import('./schemaManager.js');
+  const targetTable = schemaManager.getTable(association.model);
+
+  if (!targetTable) {
+    console.warn(`[RelationUtils] Target table ${association.model} not found for HasMany delete`);
+    return;
+  }
+
+  const foreignKey = association.foreignKey || `${service.collection.toLowerCase()}_Id`;
+  const parentId = item[service.primaryKey];
+
+  if (parentId === undefined || parentId === null) {
+    console.warn(`[RelationUtils] Cannot delete HasMany records - parentId is ${parentId}`);
+    return;
+  }
+
+  console.log(`[RelationUtils] HandleHasManyDelete: ${associationName}, onDelete=${onDelete}`);
+
+  if (onDelete === 'CASCADE') {
+    // Delete all related records
+    const fkColumn = targetTable[foreignKey];
+    if (fkColumn) {
+      const { eq } = await import('drizzle-orm');
+      await dbOrTx.delete(targetTable).where(eq(fkColumn, parentId));
+      console.log(`[RelationUtils] Cascaded delete for ${associationName}`);
+    }
+  } else if (onDelete === 'SET NULL') {
+    // Set foreign key to null on related records
+    const fkColumn = targetTable[foreignKey];
+    if (fkColumn) {
+      const { eq } = await import('drizzle-orm');
+      await dbOrTx.update(targetTable).set({ [foreignKey]: null }).where(eq(fkColumn, parentId));
+      console.log(`[RelationUtils] Set null for ${associationName}`);
+    }
+  }
+  // RESTRICT and NO ACTION are handled by database constraints
+}
+
+/**
+ * Handle HasOne delete - CASCADE or SET NULL the related record
+ */
+async function handleHasOneDelete(
+  item: any,
+  association: AssociationDefinition,
+  associationName: string,
+  service: any,
+  dbOrTx: any,
+  onDelete: string
+): Promise<void> {
+  // HasOne delete works the same as HasMany, just for a single record
+  await handleHasManyDelete(item, association, associationName, service, dbOrTx, onDelete);
+}
+
+/**
+ * Handle BelongsToMany delete - Remove junction table records
+ */
+async function handleBelongsToManyDelete(
+  item: any,
+  association: AssociationDefinition,
+  associationName: string,
+  service: any,
+  dbOrTx: any
+): Promise<void> {
+  const junctionTable = association.through;
+  if (!junctionTable) {
+    console.warn(`[RelationUtils] No junction table defined for ${associationName}`);
+    return;
+  }
+
+  const sourceKey = association.foreignKey || `${service.collection}_id`;
+  const parentId = item[service.primaryKey];
+
+  if (parentId === undefined || parentId === null) {
+    console.warn(`[RelationUtils] Cannot delete M2M junction records - parentId is ${parentId}`);
+    return;
+  }
+
+  console.log(`[RelationUtils] Removing M2M junction records from ${junctionTable} for ${associationName}`);
+
+  await dbOrTx.execute(sql`
+    DELETE FROM "${sql.raw(junctionTable)}"
+    WHERE "${sql.raw(sourceKey)}" = ${parentId}
+  `);
+}
+
+/**
+ * Handle M2A (polymorphic) delete - Remove polymorphic junction table records
+ */
+async function handleM2ADelete(
+  item: any,
+  association: AssociationDefinition,
+  associationName: string,
+  service: any,
+  dbOrTx: any
+): Promise<void> {
+  const junctionTable = association.through;
+  if (!junctionTable) {
+    console.warn(`[RelationUtils] No junction table defined for M2A ${associationName}`);
+    return;
+  }
+
+  const sourceKey = `${service.collection}_id`;
+  const parentId = item[service.primaryKey];
+
+  if (parentId === undefined || parentId === null) {
+    console.warn(`[RelationUtils] Cannot delete M2A junction records - parentId is ${parentId}`);
+    return;
+  }
+
+  console.log(`[RelationUtils] Removing M2A junction records from ${junctionTable} for ${associationName}`);
+
+  await dbOrTx.execute(sql`
+    DELETE FROM "${sql.raw(junctionTable)}"
+    WHERE "${sql.raw(sourceKey)}" = ${parentId}
+  `);
+}
+
+/**
+ * Validate relational data - ensures referenced records exist
  */
 export async function validateRelationalData(
   data: Record<string, any>,
   collection: string,
   service: any
 ): Promise<void> {
-  console.log(`[RelationUtils] Would validate relational data for ${collection}`);
+  console.log(`[RelationUtils] Validating relational data for ${collection}`);
+
+  const associations = relationBuilder.getAssociations(collection);
+  if (!associations) {
+    return;
+  }
+
+  const errors: Array<{ field: string; message: string }> = [];
+
+  for (const [key, value] of Object.entries(data)) {
+    const association = associations[key];
+    if (!association || value == null) continue;
+
+    try {
+      await validateRelation(association, key, value, service);
+    } catch (error: any) {
+      errors.push({ field: key, message: error.message });
+    }
+  }
+
+  if (errors.length > 0) {
+    const { APIError } = await import('./errorHandler.js');
+    throw new APIError('Validation failed for relational data', 400, errors);
+  }
+}
+
+/**
+ * Validate a single relation - check if referenced records exist
+ */
+async function validateRelation(
+  association: AssociationDefinition,
+  fieldName: string,
+  value: any,
+  service: any
+): Promise<void> {
+  // Dynamically import ItemsService to avoid circular dependency
+  const { default: ItemsService } = await import('../services/ItemsService.js');
+
+  const relatedService = new ItemsService(association.model, {
+    accountability: service.accountability,
+    tenant: service.tenant
+  });
+
+  switch (association.type) {
+    case 'BelongsTo':
+      if (typeof value === 'object' && !value.id) {
+        // New record to be created - validate will happen during create
+        return;
+      } else {
+        const id = typeof value === 'object' ? value.id : value;
+        try {
+          await relatedService.readOne(id, {}, true); // bypassPermissions
+        } catch (error) {
+          throw new Error(`Related record not found: ${id}`);
+        }
+      }
+      break;
+
+    case 'HasMany':
+    case 'BelongsToMany':
+      if (!Array.isArray(value)) {
+        throw new Error(`Value must be an array for ${fieldName}`);
+      }
+
+      for (const item of value) {
+        if (typeof item === 'object' && !item.id) {
+          // New record to be created - validation will happen during create
+          continue;
+        }
+
+        const id = typeof item === 'object' ? item.id : item;
+        try {
+          await relatedService.readOne(id, {}, true); // bypassPermissions
+        } catch (error) {
+          throw new Error(`Related record not found: ${id}`);
+        }
+      }
+      break;
+  }
 }
 
 /**
  * Resolve circular dependencies in data
- * TODO: Full implementation
+ * Detects BelongsTo relations that reference the parent record being created
  */
 export async function resolveCircularDependencies(
   data: Record<string, any>,
   collection: string,
   service: any
 ): Promise<{ resolvedData: Record<string, any>; deferredFields: Array<{ field: string; value: any }> }> {
-  console.log(`[RelationUtils] Would resolve circular dependencies for ${collection}`);
-  
-  return {
-    resolvedData: data,
-    deferredFields: []
-  };
+  console.log(`[RelationUtils] Resolving circular dependencies for ${collection}`);
+
+  const associations = relationBuilder.getAssociations(collection);
+  if (!associations) {
+    return { resolvedData: data, deferredFields: [] };
+  }
+
+  const resolvedData: Record<string, any> = { ...data };
+  const deferredFields: Array<{ field: string; value: any }> = [];
+
+  for (const [key, value] of Object.entries(data)) {
+    const association = associations[key];
+    if (!association || value == null) continue;
+
+    if (hasCircularDependency(association, value, service.primaryKey)) {
+      console.log(`[RelationUtils] Found circular dependency in ${key}`);
+      deferredFields.push({ field: key, value });
+      delete resolvedData[key];
+    }
+  }
+
+  console.log(`[RelationUtils] Resolved ${deferredFields.length} circular dependencies`);
+
+  return { resolvedData, deferredFields };
 }
 
 /**
- * Process deferred fields (from circular dependencies)
- * TODO: Full implementation
+ * Check if a value has circular dependency
+ * A circular dependency occurs when a BelongsTo relation references the parent's primary key
+ */
+function hasCircularDependency(
+  association: AssociationDefinition,
+  value: any,
+  primaryKey: string
+): boolean {
+  if (association.type !== 'BelongsTo') return false;
+
+  // Check if the value is an object that references the parent's primary key
+  // This happens when creating a record that has a BelongsTo pointing back to itself
+  return typeof value === 'object' && !value.id && value[primaryKey];
+}
+
+/**
+ * Process deferred fields after main record creation
+ * Updates related records to link back to the newly created parent
  */
 export async function processDeferredFields(
   item: any,
@@ -621,6 +899,37 @@ export async function processDeferredFields(
   service: any,
   transaction?: any
 ): Promise<void> {
-  console.log(`[RelationUtils] Would process ${deferredFields.length} deferred fields`);
-  // TODO: If implemented, pass transaction to any service operations
+  if (deferredFields.length === 0) return;
+
+  console.log(`[RelationUtils] Processing ${deferredFields.length} deferred fields`);
+
+  const associations = relationBuilder.getAssociations(service.collection);
+  if (!associations) return;
+
+  // Dynamically import ItemsService to avoid circular dependency
+  const { default: ItemsService } = await import('../services/ItemsService.js');
+
+  for (const { field, value } of deferredFields) {
+    const association = associations[field];
+    if (!association) continue;
+
+    // Create a service for the related model
+    const relatedService = new ItemsService(association.model, {
+      accountability: service.accountability,
+      tenant: service.tenant
+    });
+
+    // Update the related record to link to the new parent
+    const foreignKey = association.foreignKey || `${field}_Id`;
+
+    if (value[service.primaryKey]) {
+      console.log(`[RelationUtils] Updating deferred ${field}: setting ${foreignKey} = ${item[service.primaryKey]}`);
+
+      await relatedService.updateOne(
+        value[service.primaryKey],
+        { [foreignKey]: item[service.primaryKey] },
+        { transaction, bypassPermissions: true }
+      );
+    }
+  }
 }

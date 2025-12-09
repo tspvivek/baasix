@@ -153,8 +153,16 @@ function resolveSegments(
     joinCondition = eq(aliasedTargetTable[foreignKey], currentTableRef[currentPK]);
   } else if (relationType === 'BelongsToMany') {
     // BelongsToMany: through a junction table
-    // This is more complex - for now, treat as HasMany
-    // TODO: Implement proper many-to-many join through junction table
+    // For permission checks on M2M relations, we need to join through the junction table
+    // Current limitation: This treats M2M like HasMany which may not work for all cases
+    // Full M2M join would require: current -> junction -> target (two joins)
+    const junctionTable = relation.through;
+    if (junctionTable) {
+      // If junction table is defined, we should join through it
+      // For now, log a warning - full implementation would add two joins
+      console.warn(`[relationPathResolver] BelongsToMany via junction ${junctionTable} - using simplified join`);
+    }
+
     const foreignKey = relation.foreignKey || `${currentTableName.toLowerCase()}_Id`;
     const currentPK = schemaManager.getPrimaryKey(currentTableName) || 'id';
 

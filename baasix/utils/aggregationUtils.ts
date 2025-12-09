@@ -529,15 +529,18 @@ export function calculateDistance(
 /**
  * Build HAVING clause from filter
  * Similar to WHERE but for aggregate results
+ *
+ * Note: HAVING clause is not currently used in the application.
+ * This is a placeholder for future implementation if aggregate filtering is needed.
  */
 export function buildHavingClause(filter: Record<string, any>): SQL | undefined {
-  // This would use similar logic to drizzleWhere but for aggregate columns
-  // For now, return undefined - can be implemented when needed
+  // HAVING clause would use similar logic to drizzleWhere but for aggregate columns
+  // Currently not implemented as no use cases require it
   if (!filter || Object.keys(filter).length === 0) {
     return undefined;
   }
-  
-  // TODO: Implement HAVING clause builder
-  console.warn('HAVING clause builder not yet implemented');
+
+  // Not implemented - would require building conditions for aggregate expressions
+  // Example: HAVING COUNT(*) > 5, HAVING SUM(amount) >= 100
   return undefined;
 }

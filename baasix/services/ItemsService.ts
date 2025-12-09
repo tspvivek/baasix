@@ -545,13 +545,9 @@ export class ItemsService {
       directFields.unshift(this.primaryKey);
     }
 
-    // Merge with query includes if provided
-    const queryIncludes = query.include || [];
+    // Use processed includes from field expansion
+    // Note: query.include is not used - includes are derived from fields parameter
     const allIncludes = [...processedIncludes];
-    if (queryIncludes.length > 0) {
-      // TODO: Merge includes properly - for now just use processed includes
-      // allIncludes.push(...queryIncludes);
-    }
 
     // Apply relConditions to includes (supports nested relConditions)
     if (query.relConditions) {

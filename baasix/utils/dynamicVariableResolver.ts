@@ -1,8 +1,11 @@
 /**
  * Dynamic Variable Resolver
- * 
- * TODO: Full implementation
- * This is a stub that provides the interface expected by ItemsService
+ *
+ * Resolves dynamic variables in filter objects:
+ * - $CURRENT_USER.field -> actual user field value
+ * - $CURRENT_ROLE.field -> actual role field value
+ * - $NOW -> current timestamp
+ * - $NOW+DAYS_7, $NOW-HOURS_2 -> relative date calculations
  */
 
 /**

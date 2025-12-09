@@ -586,12 +586,14 @@ export async function loadHasManyRelations(
       }
     }
     
-    // Check if target table has soft deletes
-    // TODO: Add isParanoid method to SchemaManager
-    // const isParanoid = schemaManager.isParanoid(association.model);
-    // if (isParanoid) {
-    //   whereConditions.push(isNull(sql.raw('"deletedAt"')));
-    // }
+    // Check if target table has soft deletes (paranoid mode)
+    const isParanoid = schemaManager.isParanoid(association.model);
+    if (isParanoid) {
+      const deletedAtColumn = targetTable['deletedAt'];
+      if (deletedAtColumn) {
+        whereConditions.push(isNull(deletedAtColumn));
+      }
+    }
     
     const whereClause = whereConditions.length > 1
       ? and(...whereConditions)
