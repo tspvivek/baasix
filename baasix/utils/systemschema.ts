@@ -206,8 +206,9 @@ export const systemSchemas = {
                     },
                     phone: { type: "String", allowNull: true, SystemGenerated: "true" },
                     email: { type: "String", allowNull: true, SystemGenerated: "true" },
+                    emailVerified: { type: "Boolean", allowNull: false, defaultValue: false, SystemGenerated: "true" },
                     avatar_Id: { type: "UUID", SystemGenerated: "true" },
-                    password: { type: "String", allowNull: false, SystemGenerated: "true" },
+                    password: { type: "String", allowNull: true, SystemGenerated: "true" },
                     lastAccess: { type: "DateTime", allowNull: true, SystemGenerated: "true" },
                     magicLinkToken: { type: "String", allowNull: true, SystemGenerated: "true" },
                     magicLinkExpires: { type: "DateTime", allowNull: true, SystemGenerated: "true" },
@@ -279,6 +280,18 @@ export const systemSchemas = {
                         allowNull: false,
                         SystemGenerated: "true",
                     },
+                    ipAddress: {
+                        type: "String",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "IP address of the client",
+                    },
+                    userAgent: {
+                        type: "String",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "User agent string of the client",
+                    },
                     type: {
                         type: "String",
                         allowNull: true,
@@ -308,6 +321,133 @@ export const systemSchemas = {
                         fields: ["token"],
                         unique: true,
                         name: "baasix_Session_token_unique",
+                        SystemGenerated: "true",
+                    },
+                ],
+            },
+        },
+        {
+            collectionName: "baasix_Account",
+            schema: {
+                name: "Account",
+                timestamps: true,
+                fields: {
+                    id: {
+                        type: "UUID",
+                        primaryKey: true,
+                        defaultValue: { type: "UUIDV4" },
+                        SystemGenerated: "true",
+                    },
+                    user_Id: {
+                        type: "UUID",
+                        allowNull: false,
+                        SystemGenerated: "true",
+                    },
+                    accountId: {
+                        type: "String",
+                        allowNull: false,
+                        SystemGenerated: "true",
+                        description: "Account ID from OAuth provider or same as user_Id for credential accounts",
+                    },
+                    providerId: {
+                        type: "String",
+                        allowNull: false,
+                        SystemGenerated: "true",
+                        description: "Provider ID (e.g., 'credential', 'google', 'github')",
+                    },
+                    accessToken: {
+                        type: "Text",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "OAuth access token",
+                    },
+                    refreshToken: {
+                        type: "Text",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "OAuth refresh token",
+                    },
+                    accessTokenExpiresAt: {
+                        type: "DateTime",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                    },
+                    refreshTokenExpiresAt: {
+                        type: "DateTime",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                    },
+                    scope: {
+                        type: "String",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "OAuth scope",
+                    },
+                    idToken: {
+                        type: "Text",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "OAuth ID token",
+                    },
+                    password: {
+                        type: "String",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "Hashed password for credential accounts",
+                    },
+                    user: {
+                        relType: "BelongsTo",
+                        target: "baasix_User",
+                        foreignKey: "user_Id",
+                        as: "user",
+                        SystemGenerated: "true",
+                        description: "M2O",
+                        onDelete: "CASCADE",
+                    },
+                },
+                indexes: [
+                    {
+                        fields: ["user_Id", "providerId"],
+                        name: "baasix_Account_user_provider",
+                        SystemGenerated: "true",
+                    },
+                ],
+            },
+        },
+        {
+            collectionName: "baasix_Verification",
+            schema: {
+                name: "Verification",
+                timestamps: true,
+                fields: {
+                    id: {
+                        type: "UUID",
+                        primaryKey: true,
+                        defaultValue: { type: "UUIDV4" },
+                        SystemGenerated: "true",
+                    },
+                    identifier: {
+                        type: "String",
+                        allowNull: false,
+                        SystemGenerated: "true",
+                        description: "Email or other identifier for verification",
+                    },
+                    value: {
+                        type: "String",
+                        allowNull: false,
+                        SystemGenerated: "true",
+                        description: "Verification token or code",
+                    },
+                    expiresAt: {
+                        type: "DateTime",
+                        allowNull: false,
+                        SystemGenerated: "true",
+                    },
+                },
+                indexes: [
+                    {
+                        fields: ["identifier"],
+                        name: "baasix_Verification_identifier",
                         SystemGenerated: "true",
                     },
                 ],

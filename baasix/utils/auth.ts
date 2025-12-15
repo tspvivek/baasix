@@ -1,6 +1,7 @@
 /**
  * Authentication utilities for Baasix
- * Provides JWT verification, user role/permission lookup
+ * New implementation using the adapter-based auth module
+ * Provides backward compatibility with existing exports
  */
 
 import jwt from "jsonwebtoken";
@@ -12,7 +13,6 @@ import { db } from "./db.js";
 import { getCache } from "./cache.js";
 import { eq, and } from "drizzle-orm";
 import { schemaManager } from "./schemaManager.js";
-import type { SQL } from "drizzle-orm";
 import type { JWTPayload, UserWithRolesAndPermissions } from '../types/index.js';
 
 // Re-export types for backward compatibility
@@ -20,7 +20,6 @@ export type { JWTPayload, UserWithRolesAndPermissions };
 
 /**
  * Lazy getter for ItemsService to avoid circular dependency
- * The module is imported only when first accessed and then cached
  */
 let _ItemsService: any = null;
 async function getItemsService() {
@@ -113,9 +112,9 @@ export async function getRolesAndPermissions(roleId: string | number): Promise<{
  * Verify JWT token and return decoded payload
  */
 export function verifyJWT(token: string): any {
-  const secret = env.get("JWT_SECRET");
+  const secret = env.get("SECRET_KEY") || env.get("JWT_SECRET");
   if (!secret) {
-    throw new Error("JWT_SECRET not configured");
+    throw new Error("SECRET_KEY not configured");
   }
 
   try {
@@ -127,8 +126,6 @@ export function verifyJWT(token: string): any {
 
 /**
  * Get user with roles, permissions, and tenant information
- * This is used by SocketService and other services for authentication
- * Matches Sequelize implementation signature and return type
  */
 export async function getUserRolesPermissionsAndTenant(
   userId: string | number,
@@ -146,8 +143,6 @@ export async function getUserRolesPermissionsAndTenant(
   try {
     const sql = getSqlClient();
 
-    // Fetch user role with role and tenant info
-    // Use proper parameter binding for UUID values
     let userRoles;
     if (tenantId) {
       userRoles = await sql`
@@ -201,8 +196,7 @@ export async function getUserRolesPermissionsAndTenant(
       WHERE "role_Id" = ${userRole.roleId}
     `;
 
-    // Transform permissions to object format matching Sequelize
-    // Use collection_action as the key since there's no name field
+    // Transform permissions to object format
     const permissionsObj = permissions.reduce((acc: any, perm: any) => {
       const key = `${perm.collection}_${perm.action}`;
       acc[key] = {
@@ -296,14 +290,13 @@ export const authMiddleware = async (req: any, res: any, next: any) => {
         role: { id: null, name: "public" },
         tenant: null,
         permissions: [],
-        ipaddress: req.ip || req.connection.remoteAddress,
+        ipaddress: req.ip || req.connection?.remoteAddress,
       };
       return next();
     }
 
     // Verify JWT token
     const payload = jwt.verify(token, env.get("SECRET_KEY") as string) as JWTPayload;
-    console.log('JWT payload decoded:', payload);
 
     // Validate session
     const session = await validateSession(payload.sessionToken, payload.tenant_Id?.toString() || null);
@@ -317,14 +310,7 @@ export const authMiddleware = async (req: any, res: any, next: any) => {
     const roleTable = schemaManager.getTable("baasix_Role");
     const permissionTable = schemaManager.getTable("baasix_Permission");
 
-    console.log('Tables retrieved:', {
-      hasUserTable: !!userTable,
-      hasUserRoleTable: !!userRoleTable,
-      hasRoleTable: !!roleTable
-    });
-
     // Get user details with role
-    // If JWT has tenant_Id, filter UserRole by that tenant_Id to get correct role for multi-tenant users
     let users;
     if (payload.tenant_Id !== undefined && payload.tenant_Id !== null) {
       users = await db
@@ -359,16 +345,13 @@ export const authMiddleware = async (req: any, res: any, next: any) => {
         .limit(1);
     }
 
-    console.log('Users queried:', users);
-
     if (!users || users.length === 0) {
-      // Invalid user
       req.accountability = {
         user: null,
         role: { id: null, name: "public" },
         tenant: null,
         permissions: [],
-        ipaddress: req.ip || req.connection.remoteAddress,
+        ipaddress: req.ip || req.connection?.remoteAddress,
       };
       return next();
     }
@@ -381,17 +364,14 @@ export const authMiddleware = async (req: any, res: any, next: any) => {
 
     if (user.role_Id) {
       try {
-        // Use cached role and permissions
         const roleData = await getRolesAndPermissions(user.role_Id);
         role = {
           id: roleData.id,
           name: roleData.name,
           isTenantSpecific: roleData.isTenantSpecific,
         };
-        // Convert permissions object to array format for accountability
         permissions = Object.values(roleData.permissions);
       } catch {
-        // Fallback to direct database query if caching fails
         const roles = await db
           .select({
             id: roleTable.id,
@@ -413,7 +393,7 @@ export const authMiddleware = async (req: any, res: any, next: any) => {
       }
     }
 
-    // Calculate isAdmin based on role name (not from database)
+    // Calculate isAdmin based on role name
     const isAdmin = role.name === 'administrator';
 
     // Set accountability object
@@ -426,22 +406,21 @@ export const authMiddleware = async (req: any, res: any, next: any) => {
         isAdmin: isAdmin,
         role: role.name,
       } as any,
-      role: role as any,  // Now this is an object with id and name
+      role: role as any,
       tenant: user.tenant_Id || null,
       permissions: permissions || [],
-      ipaddress: req.ip || req.connection.remoteAddress,
+      ipaddress: req.ip || req.connection?.remoteAddress,
     };
 
     next();
   } catch (error: any) {
-    // Invalid token or schema not ready - treat as public access
-    console.error('Auth middleware error:', error.message, error.stack);
+    console.error('Auth middleware error:', error.message);
     req.accountability = {
       user: null,
       role: { id: null, name: "public" },
       tenant: null,
       permissions: [],
-      ipaddress: req.ip || req.connection.remoteAddress,
+      ipaddress: req.ip || req.connection?.remoteAddress,
     };
     next();
   }
@@ -451,14 +430,13 @@ export const authMiddleware = async (req: any, res: any, next: any) => {
  * Helper function to check if user is an administrator
  */
 export const isAdmin = (req: any): boolean => {
-  return req.accountability?.role?.name === "administrator" || req.accountability?.role === "administrator";
+  return req.accountability?.role?.name === "administrator" || req.accountability?.user?.isAdmin === true;
 };
 
 /**
  * Middleware to check for admin access
  */
 export const adminOnly = (req: any, res: any, next: any) => {
-  console.log('adminOnly check - accountability:', JSON.stringify(req.accountability, null, 2));
   if (!isAdmin(req)) {
     return next(new APIError("Access denied. Administrators only.", 403));
   }
@@ -480,7 +458,7 @@ export async function createSession(
   const sessionToken = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + expiresInSeconds * 1000);
 
-  const sessionId = await sessionService.createOne({
+  await sessionService.createOne({
     token: sessionToken,
     user_Id: user.id,
     type: sessionType,
@@ -518,10 +496,9 @@ export async function validateSession(
     return null;
   }
 
-  // Optional tenant validation for enhanced security (only in multi-tenant mode)
+  // Optional tenant validation for enhanced security
   const isMultiTenant = env.get("MULTI_TENANT") === "true";
   if (isMultiTenant && expectedTenantId !== null && expectedTenantId !== undefined && session.tenant_Id !== expectedTenantId) {
-    // Log the mismatch for debugging but don't block the session for now
     console.warn(`Session tenant mismatch: expected ${expectedTenantId}, got ${session.tenant_Id}`);
   }
 
@@ -537,17 +514,14 @@ export async function validateSessionLimits(
   tenantId: string | null = null,
   role: { id: string | number; name: string } | null = null
 ): Promise<{ isValid: boolean; error?: string }> {
-  // Skip validation for 'default' session types
   if (sessionType === "default") {
     return { isValid: true };
   }
 
-  // Validate session type first (before any role checks)
   if (!["mobile", "web"].includes(sessionType)) {
     return { isValid: false, error: "Invalid session type. Must be 'mobile' or 'web'" };
   }
 
-  // Always skip session limit validation for administrator role
   if (role?.name === "administrator") {
     return { isValid: true };
   }
@@ -556,7 +530,6 @@ export async function validateSessionLimits(
     const settingsService = await getSettingsService();
     const ItemsService = await getItemsService();
 
-    // Get tenant settings
     const isMultiTenantEnabled = env.get("MULTI_TENANT") === "true";
     let settings;
     if (isMultiTenantEnabled && tenantId) {
@@ -566,29 +539,23 @@ export async function validateSessionLimits(
     }
 
     if (!settings) {
-      return { isValid: true }; // No settings, allow
+      return { isValid: true };
     }
 
-    // Get session limit from dedicated fields (new approach)
     const limitKey = `${sessionType}_session_limit`;
     const sessionLimit = (settings as any)[limitKey];
 
-    // If no limit is set for this session type, allow
     if (sessionLimit === undefined || sessionLimit === null || sessionLimit === -1) {
       return { isValid: true };
     }
 
-    // Check if role is in the session_limit_roles array (if specified)
     const sessionLimitRoles = (settings as any).session_limit_roles;
     if (sessionLimitRoles && Array.isArray(sessionLimitRoles) && sessionLimitRoles.length > 0) {
-      // If roles are specified, only apply limits to those roles
       if (!role?.id || !sessionLimitRoles.includes(role.id)) {
-        return { isValid: true }; // Role not in the list, skip limit check
+        return { isValid: true };
       }
     }
-    // If session_limit_roles is null/empty, limits apply to all roles (except administrator, already checked above)
 
-    // If limit is 0, don't allow any sessions of this type
     if (sessionLimit === 0) {
       return {
         isValid: false,
@@ -596,7 +563,6 @@ export async function validateSessionLimits(
       };
     }
 
-    // Count existing active sessions of this type for the user
     const sessionService = new ItemsService('baasix_Sessions');
     const filter: any = {
       user_Id: userId,
@@ -604,7 +570,6 @@ export async function validateSessionLimits(
       expiresAt: { gt: new Date().toISOString() }
     };
 
-    // Add tenant-specific filtering only if multi-tenant mode is enabled and tenantId is provided
     if (isMultiTenantEnabled && tenantId) {
       filter.tenant_Id = tenantId;
     }
@@ -614,7 +579,6 @@ export async function validateSessionLimits(
       limit: -1
     }, true);
 
-    // Check if user has reached the limit
     if (activeSessions.data.length >= sessionLimit) {
       return {
         isValid: false,
@@ -625,7 +589,6 @@ export async function validateSessionLimits(
     return { isValid: true };
   } catch (error) {
     console.error("Error validating session limits:", error);
-    // On error, allow to avoid blocking users
     return { isValid: true };
   }
 }
@@ -640,7 +603,7 @@ export async function generateToken(
   ip: string | null = null,
   sessionType: string = "default"
 ): Promise<string> {
-  const expiresIn = parseInt(env.get("ACCESS_TOKEN_EXPIRES_IN") || "3600"); // 1 hour default
+  const expiresIn = parseInt(env.get("ACCESS_TOKEN_EXPIRES_IN") || "3600");
   const sessionToken = await createSession(user, expiresIn, sessionType, tenant?.id);
 
   const payload: any = {
@@ -673,3 +636,4 @@ export async function generateToken(
   return generateJWT(payload, `${expiresIn}s`);
 }
 
+export default authMiddleware;
