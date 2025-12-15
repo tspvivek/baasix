@@ -145,6 +145,24 @@ export function createAuthRoutes(app: Express, options: AuthRouteOptions): Baasi
         inviteToken,
       });
       
+      // Check if email verification is required
+      if (result.requiresEmailVerification) {
+        // Don't send token - user needs to verify email first
+        return res.json({
+          message: "User registered successfully. Please verify your email to login.",
+          requiresEmailVerification: true,
+          user: {
+            id: result.user.id,
+            email: result.user.email,
+            firstName: result.user.firstName,
+            lastName: result.user.lastName,
+          },
+          role: result.role,
+          permissions: result.permissions,
+          tenant: result.tenant,
+        });
+      }
+      
       // Set token in response based on authMode
       const tokenResponse = setTokenInResponse(res, result.token, authMode, options.env);
       
@@ -213,6 +231,9 @@ export function createAuthRoutes(app: Express, options: AuthRouteOptions): Baasi
     } catch (error: any) {
       if (error.message === "Invalid credentials") {
         return res.status(400).json({ message: "Incorrect password." });
+      }
+      if (error.message.includes("Email not verified")) {
+        return res.status(403).json({ message: error.message, requiresEmailVerification: true });
       }
       if (error.message.includes("Account is")) {
         return res.status(403).json({ message: error.message });

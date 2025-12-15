@@ -18,6 +18,9 @@ import { APIError } from "../utils/errorHandler.js";
 let authInstance: BaasixAuth | null = null;
 
 const registerEndpoint = (app: Express) => {
+  // Parse enabled auth services
+  const enabledServices = (env.get("AUTH_SERVICES_ENABLED") || "LOCAL").split(",").map(s => s.trim().toUpperCase());
+  
   // Initialize the new auth module
   const authOptions: AuthRouteOptions = {
     secret: env.get("SECRET_KEY") || env.get("JWT_SECRET") || "",
@@ -26,36 +29,56 @@ const registerEndpoint = (app: Express) => {
       expiresIn: parseInt(env.get("ACCESS_TOKEN_EXPIRES_IN") || "604800"), // 7 days default
     },
     emailAndPassword: {
-      enabled: true,
+      enabled: enabledServices.includes("LOCAL"), // LOCAL = email/password authentication
+      requireEmailVerification: env.get("REQUIRE_EMAIL_VERIFICATION") === "true", // Default false
       minPasswordLength: 8,
       maxPasswordLength: 128,
     },
     multiTenant: {
       enabled: env.get("MULTI_TENANT") === "true",
     },
-    // Social providers from env
-    socialProviders: {
-      google: env.get("GOOGLE_CLIENT_ID") ? {
-        clientId: env.get("GOOGLE_CLIENT_ID")!,
-        clientSecret: env.get("GOOGLE_CLIENT_SECRET")!,
-        scope: ["email", "profile"],
-      } : undefined,
-      facebook: env.get("FACEBOOK_CLIENT_ID") ? {
-        clientId: env.get("FACEBOOK_CLIENT_ID")!,
-        clientSecret: env.get("FACEBOOK_CLIENT_SECRET")!,
-      } : undefined,
-      apple: env.get("APPLE_CLIENT_ID") ? {
-        clientId: env.get("APPLE_CLIENT_ID")!,
-        clientSecret: env.get("APPLE_CLIENT_SECRET")!,
-        teamId: env.get("APPLE_TEAM_ID")!,
-        keyId: env.get("APPLE_KEY_ID")!,
-        privateKey: env.get("APPLE_PRIVATE_KEY")!,
-      } as any : undefined,
-      github: env.get("GITHUB_CLIENT_ID") ? {
-        clientId: env.get("GITHUB_CLIENT_ID")!,
-        clientSecret: env.get("GITHUB_CLIENT_SECRET")!,
-      } : undefined,
-    },
+    // Social providers from env - only enable if listed in AUTH_SERVICES_ENABLED
+    socialProviders: (() => {
+      const providers: Record<string, any> = {};
+      
+      // Google
+      if (enabledServices.includes("GOOGLE") && env.get("GOOGLE_CLIENT_ID")) {
+        providers.google = {
+          clientId: env.get("GOOGLE_CLIENT_ID")!,
+          clientSecret: env.get("GOOGLE_CLIENT_SECRET")!,
+          scope: ["email", "profile"],
+        };
+      }
+      
+      // Facebook
+      if (enabledServices.includes("FACEBOOK") && env.get("FACEBOOK_CLIENT_ID")) {
+        providers.facebook = {
+          clientId: env.get("FACEBOOK_CLIENT_ID")!,
+          clientSecret: env.get("FACEBOOK_CLIENT_SECRET")!,
+        };
+      }
+      
+      // Apple
+      if (enabledServices.includes("APPLE") && env.get("APPLE_CLIENT_ID")) {
+        providers.apple = {
+          clientId: env.get("APPLE_CLIENT_ID")!,
+          clientSecret: env.get("APPLE_CLIENT_SECRET") || "",
+          teamId: env.get("APPLE_TEAM_ID")!,
+          keyId: env.get("APPLE_KEY_ID")!,
+          privateKey: env.get("APPLE_PRIVATE_KEY")!,
+        };
+      }
+      
+      // GitHub
+      if (enabledServices.includes("GITHUB") && env.get("GITHUB_CLIENT_ID")) {
+        providers.github = {
+          clientId: env.get("GITHUB_CLIENT_ID")!,
+          clientSecret: env.get("GITHUB_CLIENT_SECRET")!,
+        };
+      }
+      
+      return providers;
+    })(),
     mailService: {
       sendMail: async (options) => {
         await mailService.sendMail(options);
@@ -71,12 +94,7 @@ const registerEndpoint = (app: Express) => {
     },
   };
 
-  // Filter out undefined providers
-  if (authOptions.socialProviders) {
-    authOptions.socialProviders = Object.fromEntries(
-      Object.entries(authOptions.socialProviders).filter(([_, v]) => v !== undefined)
-    );
-  }
+  // Create auth routes
 
   // Create auth instance and register routes
   authInstance = createAuthRoutes(app, authOptions);

@@ -335,6 +335,22 @@ export function createAuth(options: AuthOptions): BaasixAuth {
         await options.hooks.onSignUp(user, account);
       }
       
+      // Check if email verification is required
+      const requireEmailVerification = options.emailAndPassword?.requireEmailVerification === true;
+      
+      if (requireEmailVerification) {
+        // Don't create session or return token - user needs to verify email first
+        const { role, permissions, tenant } = await getUserRoleAndPermissions(user.id, tenantId);
+        return {
+          token: "", // Empty token - user needs to verify email
+          user,
+          role,
+          permissions,
+          tenant,
+          requiresEmailVerification: true,
+        };
+      }
+      
       return createAuthResponse(user, tenantId);
     },
     
@@ -356,6 +372,12 @@ export function createAuth(options: AuthOptions): BaasixAuth {
       
       if (!user) {
         throw new Error("Invalid credentials");
+      }
+      
+      // Check if email verification is required
+      const requireEmailVerification = options.emailAndPassword?.requireEmailVerification === true;
+      if (requireEmailVerification && !user.emailVerified) {
+        throw new Error("Email not verified. Please verify your email before logging in.");
       }
       
       // Get role and permissions
@@ -642,9 +664,15 @@ export function createAuth(options: AuthOptions): BaasixAuth {
         return null;
       }
       
-      const user = await adapter.findUserByEmail(email);
+      let user = await adapter.findUserByEmail(email);
       if (!user) {
         return null;
+      }
+      
+      // Mark email as verified after successful magic link login
+      if (!user.emailVerified) {
+        await adapter.updateUser(user.id, { emailVerified: true });
+        user = await adapter.findUserById(user.id) as User;
       }
       
       return createAuthResponse(user);

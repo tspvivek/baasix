@@ -358,6 +358,7 @@ export interface AuthResponse {
   role: Role;
   permissions: Permission[];
   tenant?: Tenant | null;
+  requiresEmailVerification?: boolean;
 }
 
 // ==================== JWT Types ====================
