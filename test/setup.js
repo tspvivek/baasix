@@ -12,5 +12,10 @@ globalThis.import = globalThis.import || {};
 globalThis.import.meta = globalThis.import.meta || {};
 globalThis.import.meta.url = 'file://' + process.cwd() + '/index.js';
 
+// Better-auth works natively with custom database interface
+
+
+
+
 
 

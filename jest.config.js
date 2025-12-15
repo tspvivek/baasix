@@ -5,6 +5,10 @@ export default {
     testMatch: ["**/test/**/*.test.js"],
     testPathIgnorePatterns: ["/node_modules/", "/dist/"],
     coveragePathIgnorePatterns: ["/node_modules/"],
+    transformIgnorePatterns: [
+        // Transform better-auth and better-call ESM modules
+        'node_modules/(?!(better-auth|better-call))',
+    ],
     setupFilesAfterEnv: ["<rootDir>/test/setup.js"],
     testSequencer: "<rootDir>/test/testSequencer.js",
     reporters: [
@@ -18,7 +22,7 @@ export default {
         ],
     ],
     transform: {
-        '^.+\\.(js|ts)$': ['ts-jest', {
+        '^.+\\.(js|ts|mjs)$': ['ts-jest', {
             useESM: true,
             isolatedModules: true,
             tsconfig: {

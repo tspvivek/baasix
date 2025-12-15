@@ -2,7 +2,10 @@ import request from "supertest";
 import { destroyAllTablesInDB, startServerForTesting } from "../baasix";
 import path from "path";
 import { beforeAll, test, expect, describe, afterAll } from "@jest/globals";
-
+import { fileURLToPath } from "url";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+/**
 /**
  * Test suite for token access methods
  * Tests that tokens work via Authorization header, cookie, and URL query parameter

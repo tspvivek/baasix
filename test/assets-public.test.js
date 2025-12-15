@@ -1,8 +1,10 @@
 import request from "supertest";
 import { destroyAllTablesInDB, startServerForTesting } from "../baasix";
 import path from "path";
+import { fileURLToPath } from "url";
 import { beforeAll, test, expect, describe, afterAll } from "@jest/globals";
-
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 /**
  * Test suite for isPublic field in baasix_File
  * Tests that public files bypass tenant-specific restrictions
