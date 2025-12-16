@@ -301,7 +301,16 @@ export const authMiddleware = async (req: any, res: any, next: any) => {
     // Validate session
     const session = await validateSession(payload.sessionToken, payload.tenant_Id?.toString() || null);
     if (!session) {
-      return res.status(401).json({ code: "INVALID_SESSION", message: "Invalid or expired session" });
+      // Session invalid/expired - fall back to public access instead of returning error
+      // This allows public routes to work even with expired cookies
+      req.accountability = {
+        user: null,
+        role: { id: null, name: "public" },
+        tenant: null,
+        permissions: [],
+        ipaddress: req.ip || req.connection?.remoteAddress,
+      };
+      return next();
     }
 
     // Get dynamically created tables from schema manager
