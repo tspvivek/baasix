@@ -679,18 +679,16 @@ function getSystemSchemas() {
                 fullName: { type: "string", description: "Calculated full name (virtual field)" },
                 phone: { type: "string", description: "User phone number" },
                 email: { type: "string", format: "email", description: "User email address" },
+                emailVerified: { type: "boolean", description: "Whether email is verified", default: false },
                 avatar_Id: { type: "string", format: "uuid", description: "Avatar file ID" },
-                password: { type: "string", description: "User password (hashed)" },
                 lastAccess: { type: "string", format: "date-time", description: "Last access timestamp" },
-                magicLinkToken: { type: "string", description: "Magic link token" },
-                magicLinkExpires: { type: "string", format: "date-time", description: "Magic link expiration" },
                 status: { type: "string", enum: ["active", "inactive", "deleted", "suspended", "pending"], description: "User status", default: "active" },
                 createdAt: { type: "string", format: "date-time", description: "Creation timestamp" },
                 updatedAt: { type: "string", format: "date-time", description: "Update timestamp" },
                 userRoles: { type: "array", items: { $ref: "#/components/schemas/baasix_UserRole" }, description: "User role assignments" },
                 avatar: { $ref: "#/components/schemas/baasix_File", description: "Avatar file" }
             },
-            required: ["id", "firstName", "password"]
+            required: ["id", "firstName"]
         },
         baasix_Sessions: {
             type: "object",

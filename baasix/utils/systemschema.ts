@@ -210,8 +210,6 @@ export const systemSchemas = {
                     avatar_Id: { type: "UUID", SystemGenerated: "true" },
                     password: { type: "String", allowNull: true, SystemGenerated: "true" },
                     lastAccess: { type: "DateTime", allowNull: true, SystemGenerated: "true" },
-                    magicLinkToken: { type: "String", allowNull: true, SystemGenerated: "true" },
-                    magicLinkExpires: { type: "DateTime", allowNull: true, SystemGenerated: "true" },
                     userRoles: {
                         relType: "HasMany",
                         target: "baasix_UserRole",

@@ -653,6 +653,49 @@ export function createAuthRoutes(app: Express, options: AuthRouteOptions): Baasi
     }
   });
   
+  // ==================== Admin Change Password ====================
+  
+  app.post(`${basePath}/admin/password/change`, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.accountability?.user) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      
+      // Check if user has admin role
+      const adminRoles = ['admin', 'superadmin', 'super-admin'];
+      const userRoles = req.accountability.roles || [];
+      const isAdmin = userRoles.some((role: string) => adminRoles.includes(role.toLowerCase()));
+      
+      if (!isAdmin) {
+        return res.status(403).json({ message: "Only administrators can change other users' passwords" });
+      }
+      
+      const { userId, newPassword } = req.body;
+      
+      if (!userId || !newPassword) {
+        return res.status(400).json({ message: "User ID and new password are required" });
+      }
+      
+      // Verify target user exists
+      const targetUser = await auth.getUserById(userId);
+      if (!targetUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      const success = await auth.resetPassword(userId, newPassword);
+      if (!success) {
+        return res.status(400).json({ message: "Failed to change password" });
+      }
+      
+      res.json({ message: "Password changed successfully" });
+    } catch (error: any) {
+      if (error.message.includes("Password")) {
+        return res.status(400).json({ message: error.message });
+      }
+      next(error);
+    }
+  });
+  
   // ==================== Email Verification ====================
   
   app.post(`${basePath}/email/verify`, async (req: Request, res: Response, next: NextFunction) => {
