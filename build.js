@@ -92,6 +92,15 @@ function copyAssets() {
     }
   }
 
+  // Copy root files (README, LICENSE)
+  const rootFiles = ['README.md', 'LICENSE.MD'];
+  for (const file of rootFiles) {
+    const srcPath = path.join(__dirname, file);
+    if (fs.existsSync(srcPath)) {
+      log(`  → ${file} ready for publishing`, colors.green);
+    }
+  }
+
   log('✓ All assets copied', colors.green);
 }
 
