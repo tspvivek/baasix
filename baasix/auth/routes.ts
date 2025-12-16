@@ -8,6 +8,7 @@ import type { BaasixAuth } from "./core.js";
 import type { AuthOptions } from "./types.js";
 import { createAuth } from "./core.js";
 import { getCache } from "../utils/cache.js";
+import { isAdmin } from "../utils/auth.js";
 
 // Store OAuth state in cache for validation
 const OAUTH_STATE_PREFIX = "oauth_state:";
@@ -661,12 +662,8 @@ export function createAuthRoutes(app: Express, options: AuthRouteOptions): Baasi
         return res.status(401).json({ message: "Unauthorized" });
       }
       
-      // Check if user has admin role
-      const adminRoles = ['admin', 'superadmin', 'super-admin'];
-      const userRoles = req.accountability.roles || [];
-      const isAdmin = userRoles.some((role: string) => adminRoles.includes(role.toLowerCase()));
-      
-      if (!isAdmin) {
+      // Check if user has admin role using shared isAdmin function
+      if (!isAdmin(req)) {
         return res.status(403).json({ message: "Only administrators can change other users' passwords" });
       }
       
