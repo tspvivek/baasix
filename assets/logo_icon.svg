@@ -1,0 +1,20 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF4081"/>
+      <stop offset="50%" stop-color="#9C27B0"/>
+      <stop offset="100%" stop-color="#2196F3"/>
+    </linearGradient>
+    <mask id="cutoutMask">
+      <!-- White background -->
+      <rect width="512" height="512" fill="white" />
+      <!-- Black shapes to cut out -->
+      <path d="M120 140 h133 a50 50 0 0 1 0 100 h-133 z" fill="black" />
+      <path d="M120 280 h150 a55 55 0 0 1 0 110 h-150 z" fill="black" />
+      <circle cx="361" cy="256" r="35" fill="black"/>
+    </mask>
+  </defs>
+
+  <!-- Background with mask applied -->
+  <rect width="512" height="512" fill="url(#gradient)" mask="url(#cutoutMask)" />
+</svg>

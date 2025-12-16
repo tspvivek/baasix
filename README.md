@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="https://baasix.com/logo.png" alt="Baasix Logo" width="120" />
+  <img src="https://raw.githubusercontent.com/tspvivek/baasix/master/api/assets/banner_small.jpg" alt="Baasix Banner" />
 </p>
-
-<h1 align="center">Baasix</h1>
 
 <p align="center">
   <strong>A powerful, flexible Backend as a Service (BaaS) platform for rapid application development</strong>

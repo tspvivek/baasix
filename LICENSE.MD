@@ -1,6 +1,6 @@
 # Baasix License
 
-Copyright (c) 2024-2025 Vivek T S P
+Copyright (c) 2024-2025 Vivek Palanisamy
 
 This package contains components with different licensing terms:
 
