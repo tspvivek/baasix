@@ -97,6 +97,14 @@ export {
   canSetWorkflowRoles,
 } from './workflow.js';
 
+// Sort Utilities
+export {
+  sortItems,
+  reorderItems,
+  getNextSortValue,
+} from './sortUtils.js';
+export type { SortOptions, SortResult } from './sortUtils.js';
+
 // Error handling utilities
 export { APIError, errorHandler } from './errorHandler.js';
 
