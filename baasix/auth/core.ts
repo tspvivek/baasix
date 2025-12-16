@@ -92,6 +92,13 @@ export interface BaasixAuth {
   // Password Reset
   createPasswordReset(email: string): Promise<{ token: string; expiresAt: Date }>;
   verifyPasswordReset(token: string, newPassword: string): Promise<boolean>;
+  
+  // Token Generation (for extensions)
+  generateTokenForUser(userId: string, options?: {
+    tenantId?: string | null;
+    sessionType?: string;
+    ipAddress?: string;
+  }): Promise<AuthResponse>;
 }
 
 /**
@@ -700,6 +707,18 @@ export function createAuth(options: AuthOptions): BaasixAuth {
         userId: user.id,
         newPassword,
       });
+    },
+    
+    // Generate Token for User (for extensions)
+    async generateTokenForUser(userId, options = {}) {
+      const { tenantId = null, sessionType = "default", ipAddress = null } = options;
+      
+      const user = await adapter.findUserById(userId);
+      if (!user) {
+        throw new Error("User not found");
+      }
+      
+      return createAuthResponse(user, tenantId, ipAddress, sessionType);
     },
   };
 }
