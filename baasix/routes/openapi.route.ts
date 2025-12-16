@@ -690,6 +690,39 @@ function getSystemSchemas() {
             },
             required: ["id", "firstName"]
         },
+        baasix_Account: {
+            type: "object",
+            description: "User authentication accounts (credential or OAuth providers)",
+            properties: {
+                id: { type: "string", format: "uuid", description: "Account ID" },
+                user_Id: { type: "string", format: "uuid", description: "Associated user ID" },
+                accountId: { type: "string", description: "Account ID from OAuth provider or same as user_Id for credential accounts" },
+                providerId: { type: "string", description: "Provider ID (e.g., 'credential', 'google', 'facebook', 'github', 'apple')" },
+                accessToken: { type: "string", description: "OAuth access token (sensitive, excluded from responses)" },
+                refreshToken: { type: "string", description: "OAuth refresh token (sensitive, excluded from responses)" },
+                accessTokenExpiresAt: { type: "string", format: "date-time", description: "Access token expiration timestamp" },
+                refreshTokenExpiresAt: { type: "string", format: "date-time", description: "Refresh token expiration timestamp" },
+                scope: { type: "string", description: "OAuth scope" },
+                idToken: { type: "string", description: "OAuth ID token (sensitive, excluded from responses)" },
+                createdAt: { type: "string", format: "date-time", description: "Creation timestamp" },
+                updatedAt: { type: "string", format: "date-time", description: "Update timestamp" },
+                user: { $ref: "#/components/schemas/baasix_User", description: "Associated user" }
+            },
+            required: ["id", "user_Id", "accountId", "providerId"]
+        },
+        baasix_Verification: {
+            type: "object",
+            description: "Verification tokens for email verification, password reset, and magic links",
+            properties: {
+                id: { type: "string", format: "uuid", description: "Verification ID" },
+                identifier: { type: "string", description: "Identifier (e.g., 'email-verification:user@example.com', 'magic-link:user@example.com')" },
+                value: { type: "string", description: "Token value (sensitive, excluded from responses)" },
+                expiresAt: { type: "string", format: "date-time", description: "Token expiration timestamp" },
+                createdAt: { type: "string", format: "date-time", description: "Creation timestamp" },
+                updatedAt: { type: "string", format: "date-time", description: "Update timestamp" }
+            },
+            required: ["id", "identifier", "value", "expiresAt"]
+        },
         baasix_Sessions: {
             type: "object",
             properties: {

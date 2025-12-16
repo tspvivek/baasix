@@ -112,12 +112,12 @@ export function createAuthRoutes(app: Express, options: AuthRouteOptions): Baasi
   }
   
   // Helper to store OAuth state
-  async function storeOAuthState(state: string, data: { codeVerifier: string; redirectURI: string }) {
+  async function storeOAuthState(state: string, data: { codeVerifier: string; redirectURI: string; authMode?: string }) {
     await cache.set(`${OAUTH_STATE_PREFIX}${state}`, data, OAUTH_STATE_TTL);
   }
   
   // Helper to get and delete OAuth state
-  async function getOAuthState(state: string): Promise<{ codeVerifier: string; redirectURI: string } | null> {
+  async function getOAuthState(state: string): Promise<{ codeVerifier: string; redirectURI: string; authMode?: string } | null> {
     const data = await cache.get(`${OAUTH_STATE_PREFIX}${state}`);
     if (data) {
       await cache.delete(`${OAUTH_STATE_PREFIX}${state}`);

@@ -366,7 +366,7 @@ export async function handleHasManyRelationship(
 
     // Check if foreign key is nullable by looking at schema
     const { schemaManager } = await import('./schemaManager.js');
-    const targetSchema = schemaManager.getSchemaDefinition(associationInfo.model);
+    const targetSchema = await schemaManager.getSchemaDefinition(associationInfo.model);
     const fkField = targetSchema?.fields?.[foreignKey];
     const allowsNull = !fkField || fkField.allowNull !== false;
 
