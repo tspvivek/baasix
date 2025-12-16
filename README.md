@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tspvivek/baasix/master/api/assets/banner_small.jpg" alt="Baasix Banner" />
+  <img src="https://raw.githubusercontent.com/tspvivek/baasix/master/assets/banner_small.jpg" alt="Baasix Banner" />
 </p>
 
 <p align="center">
