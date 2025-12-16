@@ -49,18 +49,23 @@ The following components are **NOT** open source and are proprietary:
 
 ### Terms
 
-1. **Usage Rights**: You are granted a non-exclusive, non-transferable license to use the Admin Dashboard as part of your Baasix installation for your own applications.
+1. **Free for Development & Testing**: You may use the Admin Dashboard freely on `localhost` for development, testing, and evaluation purposes.
 
-2. **Restrictions**: You may NOT:
+2. **Commercial License Required**: For production use on any domain other than `localhost`, you must purchase a commercial license. Visit [https://baasix.com](https://baasix.com) for pricing and licensing options.
+
+3. **Usage Rights (with Commercial License)**: Upon purchasing a commercial license, you are granted a non-exclusive, non-transferable license to use the Admin Dashboard as part of your Baasix installation for your own applications.
+
+4. **Restrictions**: You may NOT:
    - Copy, modify, or distribute the Admin Dashboard separately
    - Reverse engineer, decompile, or disassemble the Admin Dashboard
    - Remove or alter any proprietary notices or labels
    - Use the Admin Dashboard in competing products
    - Sublicense or sell the Admin Dashboard
+   - Use the Admin Dashboard in production without a valid commercial license
 
-3. **Ownership**: All rights, title, and interest in the Admin Dashboard remain with the copyright holder.
+5. **Ownership**: All rights, title, and interest in the Admin Dashboard remain with the copyright holder.
 
-4. **No Warranty**: The Admin Dashboard is provided "AS IS" without warranty of any kind.
+6. **No Warranty**: The Admin Dashboard is provided "AS IS" without warranty of any kind.
 
 ---
 
