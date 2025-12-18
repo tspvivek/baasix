@@ -92,12 +92,16 @@ function copyAssets() {
     }
   }
 
-  // Copy root files (README, LICENSE)
+  // Copy root files (README, LICENSE) to dist
   const rootFiles = ['README.md', 'LICENSE.MD'];
   for (const file of rootFiles) {
     const srcPath = path.join(__dirname, file);
+    const destPath = path.join(distDir, file);
     if (fs.existsSync(srcPath)) {
-      log(`  → ${file} ready for publishing`, colors.green);
+      fs.copyFileSync(srcPath, destPath);
+      log(`  ✓ Copied ${file}`, colors.green);
+    } else {
+      log(`  ⚠ ${file} not found`, colors.yellow);
     }
   }
 
