@@ -357,10 +357,9 @@ John Doe,john@example.com`;
                 .post(`/items/${testCollectionName}/import-csv`)
                 .attach("csvFile", filePath);
 
-            // Without authentication, should get permission error during import
-            expect(response.status).toBe(400);
-            expect(response.body.error.message).toContain("Import failed");
-            expect(response.body.error.details.results.errors[0].error).toContain("permission");
+            // Without authentication, should get 401
+            expect(response.status).toBe(401);
+            expect(response.body.error.message).toContain("Authentication required");
 
         } finally {
             cleanupTempFile(filePath);

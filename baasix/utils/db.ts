@@ -265,6 +265,9 @@ export async function createTransaction(): Promise<Transaction> {
   let resolveTxComplete: () => void;
   let rejectTxComplete: (error: any) => void;
 
+  // Transaction timeout (default 30 seconds, configurable via env)
+  const TRANSACTION_TIMEOUT_MS = parseInt(env.get('TRANSACTION_TIMEOUT_MS') || '60000');
+
   const transactionPromise = new Promise((resolve, reject) => {
     resolveTransaction = resolve;
     rejectTransaction = reject;
@@ -307,12 +310,28 @@ export async function createTransaction(): Promise<Transaction> {
     // Resolve with the transaction wrapper
     resolveTransaction(transaction);
 
-    // Wait for explicit commit or rollback
-    await new Promise<void>((resolve) => {
+    // Wait for explicit commit or rollback with timeout
+    await new Promise<void>((resolve, reject) => {
+      let resolved = false;
+      
+      // Timeout to prevent transaction from hanging forever
+      const timeoutId = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          console.error(`[Transaction] Transaction timeout after ${TRANSACTION_TIMEOUT_MS}ms - forcing rollback`);
+          transaction._rolledBack = true;
+          resolve();
+        }
+      }, TRANSACTION_TIMEOUT_MS);
+
       const checkInterval = setInterval(() => {
         if (transaction._committed || transaction._rolledBack) {
-          clearInterval(checkInterval);
-          resolve();
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeoutId);
+            clearInterval(checkInterval);
+            resolve();
+          }
         }
       }, 10);
     });

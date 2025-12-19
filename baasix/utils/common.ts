@@ -8,6 +8,7 @@ import { APIError } from "./errorHandler.js";
 import { getCache } from "./cache.js";
 import { getCacheService } from "./db.js";
 import settingsService from "../services/SettingsService.js";
+import env from "./env.js";
 
 /**
  * Middleware to check if a model/collection exists
@@ -32,20 +33,76 @@ export function requireAuth(req: any): void {
 }
 
 /**
- * Validates and adjusts accountability for tenant-specific imports (admin only)
+ * Check if a collection has a tenant_Id field (supports tenant isolation)
+ */
+export function collectionHasTenantField(collection: string): boolean {
+  try {
+    const table = schemaManager.getTable(collection);
+    // Check if table has tenant_Id column
+    return 'tenant_Id' in table;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validates and adjusts accountability for imports
+ * 
+ * Rules:
+ * - User must be authenticated (not public)
+ * - In multi-tenant mode, for collections with tenant_Id field:
+ *   - Tenant-specific users: use their tenant from accountability (already set)
+ *   - Administrators/non-tenant-specific users: must provide tenant in body
+ * - In single-tenant mode or for collections without tenant_Id: no tenant handling needed
+ * 
  * Used in: items.route.ts (import-csv and import-json)
  */
-export function getImportAccountability(req: any, tenant: any): any {
-  let accountability = req.accountability;
-  if (tenant && (req.accountability?.role as any)?.name === "administrator") {
-    accountability = {
-      ...req.accountability,
-      tenant: tenant,
-    };
-  } else if (tenant && (req.accountability?.role as any)?.name !== "administrator") {
-    throw new APIError("Only administrators can specify tenant for import", 403);
+export function getImportAccountability(req: any, collection?: string): any {
+  const accountability = req.accountability;
+  
+  // Check if user is authenticated (not public)
+  if (!accountability?.user?.id) {
+    throw new APIError("Authentication required for import operations", 401);
   }
-  return accountability;
+  
+  const isMultiTenant = env.get('MULTI_TENANT') === 'true';
+  
+  // If not multi-tenant mode, just return original accountability
+  if (!isMultiTenant) {
+    return accountability;
+  }
+  
+  // Check if the collection supports tenant isolation
+  const hasTenantField = collection ? collectionHasTenantField(collection) : false;
+  
+  // If collection doesn't have tenant field, no tenant handling needed
+  if (!hasTenantField) {
+    return accountability;
+  }
+  
+  // Check if user has a tenant-specific role (accountability already has tenant set)
+  const isTenantSpecific = accountability?.role?.isTenantSpecific === true;
+  const userTenant = accountability?.tenant;
+  
+  if (isTenantSpecific && userTenant) {
+    // Tenant-specific users: tenant is already in accountability, just return it
+    return accountability;
+  } else {
+    // Administrators or non-tenant-specific users
+    // They must provide tenant in body for tenant-enabled tables
+    const tenant = req.body?.tenant;
+    if (tenant) {
+      return {
+        ...accountability,
+        tenant: tenant,
+      };
+    } else {
+      throw new APIError(
+        "Tenant is required for importing into tenant-enabled collections. Provide 'tenant' in the request body.",
+        400
+      );
+    }
+  }
 }
 
 /**

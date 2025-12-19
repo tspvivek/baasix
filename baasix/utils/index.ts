@@ -113,6 +113,7 @@ export {
   modelExistsMiddleware,
   requireAuth,
   getImportAccountability,
+  collectionHasTenantField,
   invalidateAuthCache,
   invalidateCollectionCache,
   invalidateSettingsCache,

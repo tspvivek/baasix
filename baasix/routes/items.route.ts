@@ -35,6 +35,76 @@ const registerEndpoint = (app: Express) => {
     }
   });
 
+  // POST create multiple items - MUST be before /:id routes
+  app.post("/items/:collection/bulk", modelExistsMiddleware, async (req, res, next) => {
+    try {
+      const { collection } = req.params;
+      const items = req.body;
+
+      if (!Array.isArray(items)) {
+        return next(new APIError("Request body must be an array", 400));
+      }
+
+      const itemsService = new ItemsService(collection, {
+        accountability: req.accountability as any,
+      });
+
+      const newItemIds = await itemsService.createMany(items);
+
+      res.status(201).json({ data: newItemIds });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // PATCH update multiple items - MUST be before /:id routes
+  app.patch("/items/:collection/bulk", modelExistsMiddleware, async (req, res, next) => {
+    try {
+      const { collection } = req.params;
+      const updates = req.body;
+
+      if (!Array.isArray(updates)) {
+        return next(new APIError("Request body must be an array", 400));
+      }
+
+      const itemsService = new ItemsService(collection, {
+        accountability: req.accountability as any,
+      });
+
+      // Use updateMany for transactional safety - all updates succeed or all fail
+      // After hooks (emails, third-party calls) only execute after successful commit
+      const results = await itemsService.updateMany(updates);
+
+      res.json({ data: results });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // DELETE multiple items - MUST be before /:id routes
+  app.delete("/items/:collection/bulk", modelExistsMiddleware, async (req, res, next) => {
+    try {
+      const { collection } = req.params;
+      const ids = req.body;
+
+      if (!Array.isArray(ids)) {
+        return next(new APIError("Request body must be an array of IDs", 400));
+      }
+
+      const itemsService = new ItemsService(collection, {
+        accountability: req.accountability as any,
+      });
+
+      // Use deleteMany for transactional safety - all deletes succeed or all fail
+      // After hooks (emails, third-party calls) only execute after successful commit
+      await itemsService.deleteMany(ids);
+
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // GET single item
   app.get("/items/:collection/:id", modelExistsMiddleware, async (req, res, next) => {
     try {
@@ -133,81 +203,6 @@ const registerEndpoint = (app: Express) => {
     }
   });
 
-  // POST create multiple items
-  app.post("/items/:collection/bulk", modelExistsMiddleware, async (req, res, next) => {
-    try {
-      const { collection } = req.params;
-      const items = req.body;
-
-      if (!Array.isArray(items)) {
-        return next(new APIError("Request body must be an array", 400));
-      }
-
-      const itemsService = new ItemsService(collection, {
-        accountability: req.accountability as any,
-      });
-
-      const newItemIds = await itemsService.createMany(items);
-
-      res.status(201).json({ data: newItemIds });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // PATCH update multiple items
-  app.patch("/items/:collection/bulk", modelExistsMiddleware, async (req, res, next) => {
-    try {
-      const { collection } = req.params;
-      const updates = req.body;
-
-      if (!Array.isArray(updates)) {
-        return next(new APIError("Request body must be an array", 400));
-      }
-
-      const itemsService = new ItemsService(collection, {
-        accountability: req.accountability as any,
-      });
-
-      const results = [];
-      for (const update of updates) {
-        if (!update.id) {
-          continue;
-        }
-        const updatedId = await itemsService.updateOne(update.id, update);
-        results.push(updatedId);
-      }
-
-      res.json({ data: results });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // DELETE multiple items
-  app.delete("/items/:collection/bulk", modelExistsMiddleware, async (req, res, next) => {
-    try {
-      const { collection } = req.params;
-      const ids = req.body;
-
-      if (!Array.isArray(ids)) {
-        return next(new APIError("Request body must be an array of IDs", 400));
-      }
-
-      const itemsService = new ItemsService(collection, {
-        accountability: req.accountability as any,
-      });
-
-      for (const id of ids) {
-        await itemsService.deleteOne(id);
-      }
-
-      res.status(204).end();
-    } catch (error) {
-      next(error);
-    }
-  });
-
   // Import CSV file
   app.post(
     "/items/:collection/import-csv",
@@ -216,13 +211,12 @@ const registerEndpoint = (app: Express) => {
     async (req, res, next) => {
       try {
         const { collection } = req.params;
-        const { tenant } = req.body;
 
         // Validate file exists and type
         const csvFile = validateFileType((req as any).files?.csvFile, [".csv"], ["text/csv"], "CSV");
 
-        // Handle tenant parameter for admin users only
-        const accountability = getImportAccountability(req, tenant);
+        // Handle tenant parameter based on user role and collection tenant support
+        const accountability = getImportAccountability(req, collection);
 
         const itemsService = new ItemsService(collection, {
           accountability: accountability as any,
@@ -314,13 +308,12 @@ const registerEndpoint = (app: Express) => {
     async (req, res, next) => {
       try {
         const { collection } = req.params;
-        const { tenant } = req.body;
 
         // Validate file exists and type
         const jsonFile = validateFileType((req as any).files?.jsonFile, [".json"], ["application/json"], "JSON");
 
-        // Handle tenant parameter for admin users only
-        const accountability = getImportAccountability(req, tenant);
+        // Handle tenant parameter based on user role and collection tenant support
+        const accountability = getImportAccountability(req, collection);
 
         const itemsService = new ItemsService(collection, {
           accountability: accountability as any,

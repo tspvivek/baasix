@@ -1687,6 +1687,7 @@ export class ItemsService {
 
   /**
    * Create a new record
+   * Uses createOneCore for the transactional logic and executes after hooks after commit
    */
   async createOne(
     data: Record<string, any>,
@@ -1697,235 +1698,40 @@ export class ItemsService {
 
     // Create transaction if not provided (matches Sequelize pattern)
     const transaction = options.transaction || (await createTransaction());
+    const shouldCommit = !options.transaction; // Only commit if we created the transaction
 
     try {
-      // Execute before-create hooks with transaction
-      let hookData = await hooksManager.executeHooks(
-        this.collection,
-        'items.create',
-        this.accountability,
-        { data, transaction: options.transaction }
-      );
-
-      let modifiedData = hookData.data;
-      console.log('[ItemsService.createOne] After hooks, modifiedData:', JSON.stringify(modifiedData));
-
-      // Hash password for baasix_User
-      if (this.collection === 'baasix_User' && modifiedData.password) {
-        console.log('[ItemsService.createOne] Hashing password for baasix_User');
-        modifiedData.password = await argon2.hash(modifiedData.password);
-      }
-
-      console.log('[ItemsService.createOne] Step 1: isAdministrator');
-      const isAdmin = await this.isAdministrator();
-      console.log('[ItemsService.createOne] isAdmin result:', isAdmin);
-
-      // Apply field permissions
-      if (!options.bypassPermissions) {
-        console.log('[ItemsService.createOne] Step 2: applyFieldPermissions with isAdmin:', isAdmin);
-        await this.applyFieldPermissions(modifiedData, 'create', isAdmin);
-
-        // Apply default values from permissions
-        console.log('[ItemsService.createOne] Step 3: getDefaultValues');
-        const defaultValues = await this.getDefaultValues('create');
-        modifiedData = { ...defaultValues, ...modifiedData };
-      }
-
-      // Validate and enforce tenant context
-      console.log('[ItemsService.createOne] Step 4: validateAndEnforceTenantContext');
-      modifiedData = await this.validateAndEnforceTenantContext(modifiedData);
-
-      // Validate relational data
-      console.log('[ItemsService.createOne] Step 5: validateRelationalData');
-      await validateRelationalData(modifiedData, this.collection, this);
-
-      // Handle circular dependencies
-      console.log('[ItemsService.createOne] Step 6: resolveCircularDependencies');
-      const { resolvedData, deferredFields } = await resolveCircularDependencies(
-        modifiedData,
-        this.collection,
-        this
-      );
-
-      // Process relational data (extract nested objects/arrays)
-      console.log('[ItemsService.createOne] Step 7: processRelationalData');
-      const relationalResult = await processRelationalData(
-        this.collection,
-        resolvedData,
-        this,
-        ItemsService  // Pass ItemsService class for creating related services
-      ) as RelationalResult;
-
-      const { result: mainData, deferredM2M, deferredM2A, deferredHasMany } = relationalResult;
-
-      // Log mainData to debug undefined values
-      console.log(`[ItemsService.createOne] Collection: ${this.collection}`);
-      console.log('mainData keys:', Object.keys(mainData));
-      console.log('mainData values with undefined:', Object.entries(mainData).filter(([k, v]) => v === undefined));
-
-      // Check table schema
-      console.log('Table columns:', Object.keys((this.table as any) || {}));
-
-      // Handle usertrack: set userCreated_Id if enabled
-      console.log('[ItemsService.createOne] Step 8: Check usertrack');
-      const schemaDefinition = await schemaManager.getSchemaDefinition(this.collection);
-      if (schemaDefinition?.usertrack && this.accountability?.user?.id) {
-        console.log('[ItemsService.createOne] Usertrack enabled, setting userCreated_Id');
-        mainData.userCreated_Id = this.accountability.user.id;
-      }
-
-      // Handle sortEnabled: auto-assign sequential sort values
-      console.log('[ItemsService.createOne] Step 9: Check sortEnabled');
-      if (schemaDefinition?.sortEnabled && !mainData.sort) {
-        try {
-          // Get max sort value from table using raw SQL
-          const maxSortResult: any = await transaction.execute(
-            sql`SELECT COALESCE(MAX("sort"), 0) as "maxSort" FROM ${sql.raw(`"${this.collection}"`)}`
-          );
-
-          // Handle different result structures
-          let maxSort = 0;
-          if (maxSortResult && Array.isArray(maxSortResult)) {
-            maxSort = maxSortResult[0]?.maxSort ?? 0;
-          } else if (maxSortResult?.rows && Array.isArray(maxSortResult.rows)) {
-            maxSort = maxSortResult.rows[0]?.maxSort ?? 0;
-          }
-
-          mainData.sort = Number(maxSort) + 1;
-        } catch (sortError: any) {
-          console.error('[ItemsService.createOne] Error assigning sort value:', sortError);
-          // If sort assignment fails, continue without it (don't break the insert)
-        }
-      }
-
-      // Filter out VIRTUAL (generated) fields - they are computed automatically by the database
-      if (schemaDefinition?.fields) {
-        for (const [fieldName, fieldSchema] of Object.entries(schemaDefinition.fields)) {
-          if ((fieldSchema as any).type === 'VIRTUAL' && fieldName in mainData) {
-            delete mainData[fieldName];
-          }
-        }
-      }
-
-      // Remove undefined values before insert
-      const cleanedData: Record<string, any> = {};
-      for (const [key, value] of Object.entries(mainData)) {
-        if (value !== undefined) {
-          cleanedData[key] = value;
-        }
-      }
-
-      console.log('cleanedData keys:', Object.keys(cleanedData));
-
-      // Convert date strings to Date objects for DateTime/Timestamp fields
-      await this.convertDateFields(cleanedData, schemaDefinition);
-
-      // Insert main record using Drizzle ORM
-      // All tables (system and user-created) are loaded from baasix_SchemaDefinition
-      // and have proper pgTable definitions with full column metadata
-      let item;
-      try {
-        console.log(`[ItemsService.createOne] Using Drizzle INSERT for table: ${this.collection}`);
-        console.log(`[ItemsService.createOne] Values to insert:`, JSON.stringify(cleanedData, null, 2));
-
-        // Use transaction for insert (transaction is always available now)
-        const insertResult = await transaction
-          .insert(this.table)
-          .values(cleanedData)
-          .returning();
-
-        if (!insertResult || insertResult.length === 0) {
-          throw new APIError('Failed to create item', 500);
-        }
-        item = insertResult[0];
-      } catch (insertError: any) {
-        console.error('Insert error details:', {
-          collection: this.collection,
-          error: insertError.message,
-          cleanedDataKeys: Object.keys(cleanedData),
-          cleanedData: cleanedData
-        });
-        throw insertError;
-      }
-      const itemId = item[this.primaryKey];
-
-      // Process deferred fields (circular dependencies)
-      await processDeferredFields(item, deferredFields, this, transaction);
-
-      // Handle deferred HasMany relations
-      for (const { association, associationInfo, value } of deferredHasMany) {
-        await handleHasManyRelationship(item, association, associationInfo, value, this, ItemsService, transaction);
-      }
-
-      // Handle M2M relationships
-      for (const { association, associationInfo, value } of deferredM2M) {
-        await handleM2MRelationship(item, association, associationInfo, value, this, ItemsService, transaction);
-      }
-
-      // Handle M2A relationships
-      for (const { association, associationInfo, value } of deferredM2A) {
-        await handleM2ARelationship(item, association, associationInfo, value, this, ItemsService, transaction);
-      }
+      // Execute core create logic within transaction
+      const result = await this.createOneCore(data, transaction, options);
 
       // Commit transaction if we created it
-      if (!options.transaction) {
+      if (shouldCommit) {
         await transaction.commit();
       }
 
-      // Create audit log for create action
-      // Use structuredClone to create a deep copy without issues
-      await this.createAuditLog('create', itemId, {
+      // Create audit log for create action (after commit for single operations)
+      await this.createAuditLog('create', result.itemId, {
         before: null,
-        after: item
+        after: result.document
       }, options.transaction);
 
-      // Execute after-create hooks with transaction
-      hookData = await hooksManager.executeHooks(
+      // Execute after-create hooks (after commit to prevent side effects on rollback)
+      await hooksManager.executeHooks(
         this.collection,
         'items.create.after',
         this.accountability,
-        { data: modifiedData, document: item, transaction: options.transaction }
+        { data: result.modifiedData, document: result.document, transaction: options.transaction }
       );
 
       // Invalidate cache for this collection and all related tables
-      // This includes the main table, M2M junction tables, and related tables
-      const relatedTables: string[] = [];
+      await this.invalidateCache(result.relatedTables);
 
-      // Add junction tables from M2M relations
-      if (deferredM2M.length > 0) {
-        for (const { associationInfo } of deferredM2M) {
-          if (associationInfo.junctionTable) {
-            relatedTables.push(associationInfo.junctionTable);
-          }
-        }
-      }
-
-      // Add related tables from HasMany relations
-      if (deferredHasMany.length > 0) {
-        for (const { associationInfo } of deferredHasMany) {
-          if (associationInfo.relatedCollection) {
-            relatedTables.push(associationInfo.relatedCollection);
-          }
-        }
-      }
-
-      // Add related collections from M2A relations
-      if (deferredM2A.length > 0) {
-        for (const { associationInfo } of deferredM2A) {
-          if (associationInfo.relatedCollections) {
-            relatedTables.push(...associationInfo.relatedCollections);
-          }
-        }
-      }
-
-      await this.invalidateCache(relatedTables);
-
-      return itemId;
+      return result.itemId;
     } catch (error) {
       console.error('Error in createOne:', error);
 
       // Rollback transaction if we created it
-      if (!options.transaction) {
+      if (shouldCommit) {
         try {
           await transaction.rollback();
         } catch (rollbackError: any) {
@@ -1941,7 +1747,207 @@ export class ItemsService {
   }
 
   /**
-   * Create multiple records
+   * Internal method to perform core create logic without after hooks
+   * Used by both createOne and createMany to separate transactional data operations
+   * from after hooks that may have side effects (emails, third-party calls)
+   * 
+   * @param data - Item data to create
+   * @param transaction - Transaction to use
+   * @param options - Operation options
+   * @returns Object containing item ID, document, modified data, and related tables for cache invalidation
+   */
+  private async createOneCore(
+    data: Record<string, any>,
+    transaction: Transaction,
+    options: OperationOptions = {}
+  ): Promise<{
+    itemId: string | number;
+    document: Record<string, any>;
+    modifiedData: Record<string, any>;
+    relatedTables: string[];
+  }> {
+    console.log(`[ItemsService.createOneCore] START - Collection: ${this.collection}`);
+    console.log('[ItemsService.createOneCore] Input data:', JSON.stringify(data));
+
+    // Execute before-create hooks with transaction
+    let hookData = await hooksManager.executeHooks(
+      this.collection,
+      'items.create',
+      this.accountability,
+      { data, transaction: options.transaction }
+    );
+
+    let modifiedData = hookData.data;
+    console.log('[ItemsService.createOneCore] After before-hooks, modifiedData:', JSON.stringify(modifiedData));
+
+    // Hash password for baasix_User
+    if (this.collection === 'baasix_User' && modifiedData.password) {
+      console.log('[ItemsService.createOneCore] Hashing password for baasix_User');
+      modifiedData.password = await argon2.hash(modifiedData.password);
+    }
+
+    const isAdmin = await this.isAdministrator();
+
+    // Apply field permissions
+    if (!options.bypassPermissions) {
+      await this.applyFieldPermissions(modifiedData, 'create', isAdmin);
+      const defaultValues = await this.getDefaultValues('create');
+      modifiedData = { ...defaultValues, ...modifiedData };
+    }
+
+    // Validate and enforce tenant context
+    modifiedData = await this.validateAndEnforceTenantContext(modifiedData);
+
+    // Validate relational data
+    await validateRelationalData(modifiedData, this.collection, this);
+
+    // Handle circular dependencies
+    const { resolvedData, deferredFields } = await resolveCircularDependencies(
+      modifiedData,
+      this.collection,
+      this
+    );
+
+    // Process relational data (extract nested objects/arrays)
+    const relationalResult = await processRelationalData(
+      this.collection,
+      resolvedData,
+      this,
+      ItemsService
+    ) as RelationalResult;
+
+    const { result: mainData, deferredM2M, deferredM2A, deferredHasMany } = relationalResult;
+
+    // Handle usertrack: set userCreated_Id if enabled
+    const schemaDefinition = await schemaManager.getSchemaDefinition(this.collection);
+    if (schemaDefinition?.usertrack && this.accountability?.user?.id) {
+      mainData.userCreated_Id = this.accountability.user.id;
+    }
+
+    // Handle sortEnabled: auto-assign sequential sort values
+    if (schemaDefinition?.sortEnabled && !mainData.sort) {
+      try {
+        const maxSortResult: any = await transaction.execute(
+          sql`SELECT COALESCE(MAX("sort"), 0) as "maxSort" FROM ${sql.raw(`"${this.collection}"`)}`
+        );
+        let maxSort = 0;
+        if (maxSortResult && Array.isArray(maxSortResult)) {
+          maxSort = maxSortResult[0]?.maxSort ?? 0;
+        } else if (maxSortResult?.rows && Array.isArray(maxSortResult.rows)) {
+          maxSort = maxSortResult.rows[0]?.maxSort ?? 0;
+        }
+        mainData.sort = Number(maxSort) + 1;
+      } catch (sortError: any) {
+        console.error('[ItemsService.createOneCore] Error assigning sort value:', sortError);
+      }
+    }
+
+    // Filter out VIRTUAL (generated) fields
+    if (schemaDefinition?.fields) {
+      for (const [fieldName, fieldSchema] of Object.entries(schemaDefinition.fields)) {
+        if ((fieldSchema as any).type === 'VIRTUAL' && fieldName in mainData) {
+          delete mainData[fieldName];
+        }
+      }
+    }
+
+    // Remove undefined values before insert
+    const cleanedData: Record<string, any> = {};
+    for (const [key, value] of Object.entries(mainData)) {
+      if (value !== undefined) {
+        cleanedData[key] = value;
+      }
+    }
+
+    // Convert date strings to Date objects for DateTime/Timestamp fields
+    await this.convertDateFields(cleanedData, schemaDefinition);
+
+    // Insert main record
+    let item;
+    try {
+      const insertResult = await transaction
+        .insert(this.table)
+        .values(cleanedData)
+        .returning();
+
+      if (!insertResult || insertResult.length === 0) {
+        throw new APIError('Failed to create item', 500);
+      }
+      item = insertResult[0];
+    } catch (insertError: any) {
+      console.error('Insert error details:', {
+        collection: this.collection,
+        error: insertError.message,
+        cleanedDataKeys: Object.keys(cleanedData),
+        cleanedData: cleanedData
+      });
+      throw insertError;
+    }
+    const itemId = item[this.primaryKey];
+
+    // Process deferred fields (circular dependencies)
+    await processDeferredFields(item, deferredFields, this, transaction);
+
+    // Handle deferred HasMany relations
+    for (const { association, associationInfo, value } of deferredHasMany) {
+      await handleHasManyRelationship(item, association, associationInfo, value, this, ItemsService, transaction);
+    }
+
+    // Handle M2M relationships
+    for (const { association, associationInfo, value } of deferredM2M) {
+      await handleM2MRelationship(item, association, associationInfo, value, this, ItemsService, transaction);
+    }
+
+    // Handle M2A relationships
+    for (const { association, associationInfo, value } of deferredM2A) {
+      await handleM2ARelationship(item, association, associationInfo, value, this, ItemsService, transaction);
+    }
+
+    // Collect related tables for cache invalidation
+    const relatedTables: string[] = [];
+    if (deferredM2M.length > 0) {
+      for (const { associationInfo } of deferredM2M) {
+        if (associationInfo.junctionTable) {
+          relatedTables.push(associationInfo.junctionTable);
+        }
+      }
+    }
+    if (deferredHasMany.length > 0) {
+      for (const { associationInfo } of deferredHasMany) {
+        if (associationInfo.relatedCollection) {
+          relatedTables.push(associationInfo.relatedCollection);
+        }
+      }
+    }
+    if (deferredM2A.length > 0) {
+      for (const { associationInfo } of deferredM2A) {
+        if (associationInfo.relatedCollections) {
+          relatedTables.push(...associationInfo.relatedCollections);
+        }
+      }
+    }
+
+    return {
+      itemId,
+      document: item,
+      modifiedData,
+      relatedTables
+    };
+  }
+
+  /**
+   * Create multiple records with transactional safety
+   * 
+   * This method ensures that:
+   * 1. All items are created within a single transaction
+   * 2. If any creation fails, all previous creations are rolled back
+   * 3. After hooks (which may have external side effects like emails, API calls)
+   *    are only executed AFTER the transaction is successfully committed
+   * 
+   * This prevents situations where:
+   * - Emails are sent for items that were later rolled back
+   * - Third-party systems are notified about changes that didn't persist
+   * 
    * @param items - Array of items to create
    * @param options - Operation options
    * @returns Array of created item IDs
@@ -1950,299 +1956,712 @@ export class ItemsService {
     items: Record<string, any>[],
     options: OperationOptions = {}
   ): Promise<(string | number)[]> {
-    const ids: (string | number)[] = [];
-
-    for (const item of items) {
-      const id = await this.createOne(item, options);
-      ids.push(id);
+    if (items.length === 0) {
+      return [];
     }
 
-    return ids;
+    // Create transaction if not provided
+    const transaction = options.transaction || (await createTransaction());
+    const shouldCommit = !options.transaction; // Only commit if we created the transaction
+
+    // Store results for after hooks
+    const results: {
+      itemId: string | number;
+      document: Record<string, any>;
+      modifiedData: Record<string, any>;
+      relatedTables: string[];
+    }[] = [];
+
+    try {
+      // Phase 1: Execute all core create operations within transaction
+      for (const item of items) {
+        const result = await this.createOneCore(item, transaction, options);
+        results.push(result);
+      }
+
+      // Phase 2: Commit transaction (if we created it)
+      if (shouldCommit) {
+        await transaction.commit();
+      }
+
+      // Phase 3: Execute after hooks AFTER successful commit
+      // These may have external side effects (emails, third-party calls)
+      // that cannot be rolled back, so we only execute them after commit
+      for (const result of results) {
+        // Create audit log
+        await this.createAuditLog('create', result.itemId, {
+          before: null,
+          after: result.document
+        }, options.transaction);
+
+        // Execute after-create hooks
+        await hooksManager.executeHooks(
+          this.collection,
+          'items.create.after',
+          this.accountability,
+          { data: result.modifiedData, document: result.document, transaction: options.transaction }
+        );
+      }
+
+      // Invalidate cache for all affected tables
+      const allRelatedTables = [...new Set(results.flatMap(r => r.relatedTables))];
+      await this.invalidateCache(allRelatedTables);
+
+      return results.map(r => r.itemId);
+    } catch (error) {
+      console.error('Error in createMany:', error);
+
+      // Rollback transaction if we created it
+      if (shouldCommit) {
+        try {
+          await transaction.rollback();
+        } catch (rollbackError: any) {
+          if (rollbackError.message !== '__ROLLBACK__') {
+            console.error('Error during rollback:', rollbackError);
+          }
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Internal method to perform core update logic without after hooks
+   * Used by both updateOne and updateMany to separate transactional data operations
+   * from after hooks that may have side effects (emails, third-party calls)
+   * 
+   * @param id - Item ID to update
+   * @param data - Item data to update
+   * @param transaction - Transaction to use
+   * @param options - Operation options
+   * @returns Object containing update info for after hooks execution
+   */
+  private async updateOneCore(
+    id: string | number,
+    data: Record<string, any>,
+    transaction: Transaction,
+    options: OperationOptions = {}
+  ): Promise<{
+    parsedId: string | number;
+    modifiedData: Record<string, any>;
+    finalDocument: Record<string, any>;
+    previousDocument: Record<string, any>;
+    relatedTables: string[];
+  }> {
+    const parsedId = this.parseId(id);
+
+    // Execute before-update hooks with transaction
+    let hookData = await hooksManager.executeHooks(
+      this.collection,
+      'items.update',
+      this.accountability,
+      { id: parsedId, data, transaction: options.transaction }
+    );
+
+    let modifiedData = hookData.data;
+
+    // Hash password for baasix_User
+    if (this.collection === 'baasix_User' && modifiedData.password) {
+      modifiedData.password = await argon2.hash(modifiedData.password);
+    }
+
+    const isAdmin = await this.isAdministrator();
+
+    // Apply field permissions
+    if (!options.bypassPermissions) {
+      await this.applyFieldPermissions(modifiedData, 'update', isAdmin);
+      const defaultValues = await this.getDefaultValues('update');
+      modifiedData = { ...defaultValues, ...modifiedData };
+    }
+
+    // Validate and enforce tenant context
+    modifiedData = await this.validateAndEnforceTenantContext(modifiedData);
+
+    // Filter out VIRTUAL (generated) fields
+    let schemaDefinition = await schemaManager.getSchemaDefinition(this.collection);
+    if (schemaDefinition?.fields) {
+      for (const [fieldName, fieldSchema] of Object.entries(schemaDefinition.fields)) {
+        if ((fieldSchema as any).type === 'VIRTUAL' && fieldName in modifiedData) {
+          delete modifiedData[fieldName];
+        }
+      }
+    }
+
+    // Build filter for existing record check
+    let filter: FilterObject = {
+      [this.primaryKey]: parsedId
+    };
+
+    if (!options.bypassPermissions && !isAdmin) {
+      const roleId = await this.getRoleId();
+      const permissionFilter = await permissionService.getFilter(
+        roleId,
+        this.collection,
+        'update',
+        this.accountability
+      );
+
+      if (permissionFilter.conditions) {
+        filter = combineFilters(filter, permissionFilter.conditions);
+      }
+    }
+
+    filter = await this.enforceTenantContextFilter(filter);
+    filter = await resolveDynamicVariables(filter, this.accountability);
+
+    // Check if record exists and user has permission
+    const filterJoins: any[] = [];
+    const whereClause = drizzleWhere(filter, {
+      table: this.table,
+      tableName: this.collection,
+      schema: this.table as any,
+      joins: filterJoins,
+      forPermissionCheck: true
+    });
+
+    // Deduplicate filter joins by alias
+    const uniqueJoins: any[] = [];
+    const seenAliases = new Set<string>();
+    for (const join of filterJoins) {
+      if (!seenAliases.has(join.alias)) {
+        seenAliases.add(join.alias);
+        uniqueJoins.push(join);
+      }
+    }
+    filterJoins.length = 0;
+    filterJoins.push(...uniqueJoins);
+
+    let existingItems;
+    if (filterJoins.length > 0) {
+      // Use transaction for reads to prevent deadlocks and ensure consistency
+      let query: any = transaction.select().from(this.table);
+      filterJoins.forEach((join) => {
+        const { table: joinTable, condition, type = 'left' } = join;
+        const joinMethod = type === 'inner' ? 'innerJoin' : 'leftJoin';
+        query = query[joinMethod](joinTable, condition);
+      });
+      existingItems = await query.where(whereClause).limit(1);
+    } else {
+      // Use transaction for reads to prevent deadlocks and ensure consistency
+      existingItems = await transaction
+        .select()
+        .from(this.table)
+        .where(whereClause)
+        .limit(1);
+    }
+
+    if (!existingItems || existingItems.length === 0) {
+      throw new APIError("Item not found or you don't have permission to update it", 403);
+    }
+
+    const existingItem = existingItems[0];
+
+    // Ensure tenant_Id cannot be changed (except by admin)
+    if (
+      this.isMultiTenant &&
+      modifiedData.tenant_Id &&
+      modifiedData.tenant_Id !== existingItem.tenant_Id &&
+      !isAdmin
+    ) {
+      throw new APIError("Cannot change item's tenant", 403);
+    }
+
+    // Process relational data
+    const relationalResult = await processRelationalData(
+      this.collection,
+      modifiedData,
+      this,
+      ItemsService
+    ) as RelationalResult;
+
+    const { result: mainData, deferredM2M, deferredM2A, deferredHasMany } = relationalResult;
+
+    // Handle usertrack: set userUpdated_Id if enabled
+    if (!schemaDefinition) {
+      schemaDefinition = await schemaManager.getSchemaDefinition(this.collection);
+    }
+    if (schemaDefinition?.usertrack && this.accountability?.user?.id) {
+      mainData.userUpdated_Id = this.accountability.user.id;
+    }
+
+    // Convert date strings to Date objects for DateTime/Timestamp fields
+    await this.convertDateFields(mainData, schemaDefinition);
+
+    // Update main record only if there are fields to update
+    let updatedItem;
+    if (Object.keys(mainData).length > 0) {
+      const updateResult = await transaction
+        .update(this.table)
+        .set(mainData)
+        .where(eq(this.getPrimaryKeyColumn(), parsedId))
+        .returning();
+
+      if (!updateResult || updateResult.length === 0) {
+        if (deferredM2M.length === 0 && deferredM2A.length === 0 && deferredHasMany.length === 0) {
+          // No update needed, return existing item info
+          return {
+            parsedId,
+            modifiedData,
+            finalDocument: existingItem,
+            previousDocument: existingItem,
+            relatedTables: []
+          };
+        }
+      }
+      updatedItem = updateResult[0];
+    } else {
+      // Use transaction for reads to prevent deadlocks and ensure consistency
+      const updatedItems = await transaction
+        .select()
+        .from(this.table)
+        .where(eq(this.getPrimaryKeyColumn(), parsedId))
+        .limit(1);
+      updatedItem = updatedItems[0];
+    }
+
+    // Process deferred HasMany relations
+    for (const { association, associationInfo, value } of deferredHasMany) {
+      await handleHasManyRelationship(updatedItem, association, associationInfo, value, this, ItemsService, transaction);
+    }
+
+    // Handle M2M relationships
+    for (const { association, associationInfo, value } of deferredM2M) {
+      await handleM2MRelationship(updatedItem, association, associationInfo, value, this, ItemsService, transaction);
+    }
+
+    // Handle M2A relationships
+    for (const { association, associationInfo, value } of deferredM2A) {
+      await handleM2ARelationship(updatedItem, association, associationInfo, value, this, ItemsService, transaction);
+    }
+
+    // Get final item for hooks - use transaction for consistency
+    const finalItems = await transaction
+      .select()
+      .from(this.table)
+      .where(eq(this.getPrimaryKeyColumn(), parsedId))
+      .limit(1);
+
+    const finalItem = finalItems[0];
+
+    // Collect related tables for cache invalidation
+    const relatedTables: string[] = [];
+    if (deferredM2M.length > 0) {
+      for (const { associationInfo } of deferredM2M) {
+        if (associationInfo.junctionTable) {
+          relatedTables.push(associationInfo.junctionTable);
+        }
+      }
+    }
+    if (deferredHasMany.length > 0) {
+      for (const { associationInfo } of deferredHasMany) {
+        if (associationInfo.relatedCollection) {
+          relatedTables.push(associationInfo.relatedCollection);
+        }
+      }
+    }
+    if (deferredM2A.length > 0) {
+      for (const { associationInfo } of deferredM2A) {
+        if (associationInfo.relatedCollections) {
+          relatedTables.push(...associationInfo.relatedCollections);
+        }
+      }
+    }
+
+    return {
+      parsedId,
+      modifiedData,
+      finalDocument: finalItem,
+      previousDocument: existingItem,
+      relatedTables
+    };
+  }
+
+  /**
+   * Update multiple records with transactional safety
+   * 
+   * This method ensures that:
+   * 1. All items are updated within a single transaction
+   * 2. If any update fails, all previous updates are rolled back
+   * 3. After hooks (which may have external side effects like emails, API calls)
+   *    are only executed AFTER the transaction is successfully committed
+   * 
+   * @param updates - Array of objects with id and data to update
+   * @param options - Operation options
+   * @returns Array of updated item IDs
+   */
+  async updateMany(
+    updates: { id: string | number; data?: Record<string, any>; [key: string]: any }[],
+    options: OperationOptions = {}
+  ): Promise<(string | number)[]> {
+    if (updates.length === 0) {
+      return [];
+    }
+
+    // Create transaction if not provided
+    const transaction = options.transaction || (await createTransaction());
+    const shouldCommit = !options.transaction;
+
+    // Store results for after hooks
+    const results: {
+      parsedId: string | number;
+      modifiedData: Record<string, any>;
+      finalDocument: Record<string, any>;
+      previousDocument: Record<string, any>;
+      relatedTables: string[];
+    }[] = [];
+
+    try {
+      // Phase 1: Execute all core update operations within transaction
+      for (const update of updates) {
+        const { id, data, ...rest } = update;
+        if (!id) continue;
+        
+        // Support both {id, data: {...}} and {id, field1, field2, ...} formats
+        const updateData = data || rest;
+        const result = await this.updateOneCore(id, updateData, transaction, options);
+        results.push(result);
+      }
+
+      // Phase 2: Commit transaction (if we created it)
+      if (shouldCommit) {
+        await transaction.commit();
+      }
+
+      // Phase 3: Execute after hooks AFTER successful commit
+      for (const result of results) {
+        // Create audit log
+        await this.createAuditLog('update', result.parsedId, {
+          before: result.previousDocument,
+          after: result.finalDocument
+        }, options.transaction);
+
+        // Execute after-update hooks
+        await hooksManager.executeHooks(
+          this.collection,
+          'items.update.after',
+          this.accountability,
+          {
+            id: result.parsedId,
+            data: result.modifiedData,
+            document: result.finalDocument,
+            previousDocument: result.previousDocument,
+            transaction: options.transaction
+          }
+        );
+      }
+
+      // Invalidate cache for all affected tables
+      const allRelatedTables = [...new Set(results.flatMap(r => r.relatedTables))];
+      await this.invalidateCache(allRelatedTables);
+
+      return results.map(r => r.parsedId);
+    } catch (error) {
+      console.error('Error in updateMany:', error);
+
+      if (shouldCommit) {
+        try {
+          await transaction.rollback();
+        } catch (rollbackError: any) {
+          if (rollbackError.message !== '__ROLLBACK__') {
+            console.error('Error during rollback:', rollbackError);
+          }
+        }
+      }
+
+      throw error;
+    }
   }
 
   /**
    * Update a record by ID
+   * Uses updateOneCore for the transactional logic and executes after hooks after commit
    */
   async updateOne(
     id: string | number,
     data: Record<string, any>,
     options: OperationOptions = {}
   ): Promise<string | number> {
-    const parsedId = this.parseId(id);
-
     // Create transaction if not provided (matches Sequelize pattern)
     const transaction = options.transaction || (await createTransaction());
+    const shouldCommit = !options.transaction;
 
     try {
-      // Execute before-update hooks with transaction
-      let hookData = await hooksManager.executeHooks(
-        this.collection,
-        'items.update',
-        this.accountability,
-        { id: parsedId, data, transaction: options.transaction }
-      );
-
-      let modifiedData = hookData.data;
-
-      // Hash password for baasix_User
-      if (this.collection === 'baasix_User' && modifiedData.password) {
-        modifiedData.password = await argon2.hash(modifiedData.password);
-      }
-
-      const isAdmin = await this.isAdministrator();
-
-      // Apply field permissions
-      if (!options.bypassPermissions) {
-        await this.applyFieldPermissions(modifiedData, 'update', isAdmin);
-
-        // Apply default values from permissions
-        const defaultValues = await this.getDefaultValues('update');
-        modifiedData = { ...defaultValues, ...modifiedData };
-      }
-
-      // Validate and enforce tenant context
-      modifiedData = await this.validateAndEnforceTenantContext(modifiedData);
-
-      // Filter out VIRTUAL (generated) fields - they cannot be updated directly
-      let schemaDefinition = await schemaManager.getSchemaDefinition(this.collection);
-      if (schemaDefinition?.fields) {
-        for (const [fieldName, fieldSchema] of Object.entries(schemaDefinition.fields)) {
-          if ((fieldSchema as any).type === 'VIRTUAL' && fieldName in modifiedData) {
-            delete modifiedData[fieldName];
-          }
-        }
-      }
-
-      // Build filter for existing record check
-      let filter: FilterObject = {
-        [this.primaryKey]: parsedId
-      };
-
-      if (!options.bypassPermissions && !isAdmin) {
-        const roleId = await this.getRoleId();
-        const permissionFilter = await permissionService.getFilter(
-          roleId,
-          this.collection,
-          'update',
-          this.accountability
-        );
-
-        if (permissionFilter.conditions) {
-          filter = combineFilters(filter, permissionFilter.conditions);
-        }
-      }
-
-      filter = await this.enforceTenantContextFilter(filter);
-
-      // Resolve dynamic variables in filter (e.g., $CURRENT_USER.id)
-      filter = await resolveDynamicVariables(filter, this.accountability);
-
-      // Check if record exists and user has permission
-      const filterJoins: any[] = [];
-      const whereClause = drizzleWhere(filter, {
-        table: this.table,
-        tableName: this.collection,
-        schema: this.table as any, // Pass table columns as schema
-        joins: filterJoins,
-        forPermissionCheck: true // Use INNER JOINs to ensure related records exist
-      });
-
-      // Deduplicate filter joins by alias
-      const uniqueJoins: any[] = [];
-      const seenAliases = new Set<string>();
-      for (const join of filterJoins) {
-        if (!seenAliases.has(join.alias)) {
-          seenAliases.add(join.alias);
-          uniqueJoins.push(join);
-        }
-      }
-      filterJoins.length = 0;
-      filterJoins.push(...uniqueJoins);
-
-      let existingItems;
-      if (filterJoins.length > 0) {
-        // Build Drizzle query with JOINs using query builder methods
-        // apply joins dynamically then add WHERE clause
-        let query: any = db.select().from(this.table);
-
-        // Apply each join using Drizzle's join methods
-        filterJoins.forEach((join) => {
-          const { table: joinTable, condition, type = 'left' } = join;
-          const joinMethod = type === 'inner' ? 'innerJoin' : 'leftJoin';
-          query = query[joinMethod](joinTable, condition);
-        });
-
-        // Apply WHERE clause and limit
-        existingItems = await query.where(whereClause).limit(1);
-      } else {
-        // Simple query without joins
-        existingItems = await db
-          .select()
-          .from(this.table)
-          .where(whereClause)
-          .limit(1);
-      }
-
-      if (!existingItems || existingItems.length === 0) {
-        throw new APIError("Item not found or you don't have permission to update it", 403);
-      }
-
-      const existingItem = existingItems[0];
-
-      // Ensure tenant_Id cannot be changed (except by admin)
-      if (
-        this.isMultiTenant &&
-        modifiedData.tenant_Id &&
-        modifiedData.tenant_Id !== existingItem.tenant_Id &&
-        !isAdmin
-      ) {
-        throw new APIError("Cannot change item's tenant", 403);
-      }
-
-      // Process relational data
-      const relationalResult = await processRelationalData(
-        this.collection,
-        modifiedData,
-        this,
-        ItemsService  // Pass ItemsService class for creating related services
-      ) as RelationalResult;
-
-      const { result: mainData, deferredM2M, deferredM2A, deferredHasMany } = relationalResult;
-
-      // Note: VIRTUAL fields already filtered from modifiedData earlier
-
-      // Handle usertrack: set userUpdated_Id if enabled
-      // Reuse schemaDefinition from earlier if available, otherwise get it
-      if (!schemaDefinition) {
-        schemaDefinition = await schemaManager.getSchemaDefinition(this.collection);
-      }
-      if (schemaDefinition?.usertrack && this.accountability?.user?.id) {
-        mainData.userUpdated_Id = this.accountability.user.id;
-      }
-
-      // Convert date strings to Date objects for DateTime/Timestamp fields
-      await this.convertDateFields(mainData, schemaDefinition);
-
-      // Update main record only if there are fields to update
-      let updatedItem;
-      if (Object.keys(mainData).length > 0) {
-        const updateResult = await transaction
-          .update(this.table)
-          .set(mainData)
-          .where(eq(this.getPrimaryKeyColumn(), parsedId))
-          .returning();
-
-        if (!updateResult || updateResult.length === 0) {
-          // If no main fields updated but has deferred relations, continue
-          if (deferredM2M.length === 0 && deferredM2A.length === 0 && deferredHasMany.length === 0) {
-            return parsedId;
-          }
-        }
-
-        updatedItem = updateResult[0];
-      } else {
-        // No main fields to update, just get the existing item for deferred relations
-        console.log('[ItemsService.updateOne] No main fields to update, only processing relations');
-        const updatedItems = await db
-          .select()
-          .from(this.table)
-          .where(eq(this.getPrimaryKeyColumn(), parsedId))
-          .limit(1);
-
-        updatedItem = updatedItems[0];
-      }
-
-      // Process deferred HasMany relations
-      for (const { association, associationInfo, value } of deferredHasMany) {
-        await handleHasManyRelationship(updatedItem, association, associationInfo, value, this, ItemsService, transaction);
-      }
-
-      // Handle M2M relationships
-      for (const { association, associationInfo, value } of deferredM2M) {
-        await handleM2MRelationship(updatedItem, association, associationInfo, value, this, ItemsService, transaction);
-      }
-
-      // Handle M2A relationships
-      for (const { association, associationInfo, value } of deferredM2A) {
-        await handleM2ARelationship(updatedItem, association, associationInfo, value, this, ItemsService, transaction);
-      }
+      // Execute core update logic within transaction
+      const result = await this.updateOneCore(id, data, transaction, options);
 
       // Commit transaction if we created it
-      if (!options.transaction) {
+      if (shouldCommit) {
         await transaction.commit();
       }
 
-      // Get final item for hooks
-      const finalItems = await db
-        .select()
-        .from(this.table)
-        .where(eq(this.getPrimaryKeyColumn(), parsedId))
-        .limit(1);
-
-      const finalItem = finalItems[0];
-
-      // Create audit log for update action
-      await this.createAuditLog('update', parsedId, {
-        before: existingItem,
-        after: finalItem
+      // Create audit log for update action (after commit)
+      await this.createAuditLog('update', result.parsedId, {
+        before: result.previousDocument,
+        after: result.finalDocument
       }, options.transaction);
 
-      // Execute after-update hooks with transaction
-      hookData = await hooksManager.executeHooks(
+      // Execute after-update hooks (after commit to prevent side effects on rollback)
+      await hooksManager.executeHooks(
         this.collection,
         'items.update.after',
         this.accountability,
         {
-          id: parsedId,
-          data: modifiedData,
-          document: finalItem,
-          previousDocument: existingItem,
+          id: result.parsedId,
+          data: result.modifiedData,
+          document: result.finalDocument,
+          previousDocument: result.previousDocument,
           transaction: options.transaction
         }
       );
 
       // Invalidate cache for this collection and all related tables
-      const relatedTables: string[] = [];
+      await this.invalidateCache(result.relatedTables);
 
-      // Add junction tables from M2M relations
-      if (deferredM2M.length > 0) {
-        for (const { associationInfo } of deferredM2M) {
-          if (associationInfo.junctionTable) {
-            relatedTables.push(associationInfo.junctionTable);
-          }
-        }
-      }
-
-      // Add related tables from HasMany relations
-      if (deferredHasMany.length > 0) {
-        for (const { associationInfo } of deferredHasMany) {
-          if (associationInfo.relatedCollection) {
-            relatedTables.push(associationInfo.relatedCollection);
-          }
-        }
-      }
-
-      // Add related collections from M2A relations
-      if (deferredM2A.length > 0) {
-        for (const { associationInfo } of deferredM2A) {
-          if (associationInfo.relatedCollections) {
-            relatedTables.push(...associationInfo.relatedCollections);
-          }
-        }
-      }
-
-      await this.invalidateCache(relatedTables);
-
-      return parsedId;
+      return result.parsedId;
     } catch (error) {
       console.error('Error in updateOne:', error);
 
       // Rollback transaction if we created it
-      if (!options.transaction) {
+      if (shouldCommit) {
         try {
           await transaction.rollback();
         } catch (rollbackError: any) {
-          // Ignore __ROLLBACK__ errors as they're intentional
+          if (rollbackError.message !== '__ROLLBACK__') {
+            console.error('Error during rollback:', rollbackError);
+          }
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Internal method to perform core delete logic without after hooks
+   * Used by both deleteOne and deleteMany to separate transactional data operations
+   * from after hooks that may have side effects (emails, third-party calls)
+   * 
+   * @param id - Item ID to delete
+   * @param transaction - Transaction to use
+   * @param options - Operation options
+   * @returns Object containing delete info for after hooks execution
+   */
+  private async deleteOneCore(
+    id: string | number,
+    transaction: Transaction,
+    options: OperationOptions = {}
+  ): Promise<{
+    parsedId: string | number;
+    document: Record<string, any>;
+  }> {
+    const parsedId = this.parseId(id);
+
+    // Execute before-delete hooks with transaction
+    await hooksManager.executeHooks(
+      this.collection,
+      'items.delete',
+      this.accountability,
+      { id: parsedId, transaction: options.transaction }
+    );
+
+    const isAdmin = await this.isAdministrator();
+
+    // Check permission
+    if (!options.bypassPermissions && !isAdmin) {
+      const roleId = await this.getRoleId();
+      const hasPermission = await permissionService.canAccess(
+        roleId,
+        this.collection,
+        'delete'
+      );
+
+      if (!hasPermission) {
+        throw new APIError("You don't have permission to delete this item", 403);
+      }
+    }
+
+    // Build filter for existing record check
+    let filter: FilterObject = {
+      [this.primaryKey]: parsedId
+    };
+
+    if (!options.bypassPermissions && !isAdmin) {
+      const roleId = await this.getRoleId();
+      const permissionFilter = await permissionService.getFilter(
+        roleId,
+        this.collection,
+        'delete',
+        this.accountability
+      );
+
+      if (permissionFilter.conditions) {
+        filter = combineFilters(filter, permissionFilter.conditions);
+      }
+    }
+
+    filter = await this.enforceTenantContextFilter(filter);
+    filter = await resolveDynamicVariables(filter, this.accountability);
+
+    // Check if record exists and user has permission
+    const filterJoins: any[] = [];
+    const whereClause = drizzleWhere(filter, {
+      table: this.table,
+      tableName: this.collection,
+      schema: this.table as any,
+      joins: filterJoins,
+      forPermissionCheck: true
+    });
+
+    // Deduplicate filter joins by alias
+    const uniqueJoins: any[] = [];
+    const seenAliases = new Set<string>();
+    for (const join of filterJoins) {
+      if (!seenAliases.has(join.alias)) {
+        seenAliases.add(join.alias);
+        uniqueJoins.push(join);
+      }
+    }
+    filterJoins.length = 0;
+    filterJoins.push(...uniqueJoins);
+
+    let existingItems;
+    if (filterJoins.length > 0) {
+      // Use transaction for reads to prevent deadlocks and ensure consistency
+      let query: any = transaction.select().from(this.table);
+      filterJoins.forEach((join) => {
+        const { table: joinTable, condition, type = 'left' } = join;
+        const joinMethod = type === 'inner' ? 'innerJoin' : 'leftJoin';
+        query = query[joinMethod](joinTable, condition);
+      });
+      existingItems = await query.where(whereClause).limit(1);
+    } else {
+      // Use transaction for reads to prevent deadlocks and ensure consistency
+      existingItems = await transaction
+        .select()
+        .from(this.table)
+        .where(whereClause)
+        .limit(1);
+    }
+
+    if (!existingItems || existingItems.length === 0) {
+      throw new APIError("Item not found or you don't have permission to delete it", 403);
+    }
+
+    const item = existingItems[0];
+
+    // Handle related records cleanup based on onDelete settings
+    await handleRelatedRecordsBeforeDelete(item, this, transaction);
+
+    // Check if paranoid mode is enabled
+    const isParanoid = schemaManager.isParanoid(this.collection);
+    const forceDelete = options.force === true;
+
+    let result;
+
+    if (isParanoid && !forceDelete) {
+      // Soft delete: Set deletedAt timestamp
+      const userId = this.accountability?.user?.id;
+      const softDeleteData = softDelete(userId ? String(userId) : undefined);
+
+      result = await transaction
+        .update(this.table)
+        .set(softDeleteData)
+        .where(eq(this.getPrimaryKeyColumn(), parsedId))
+        .returning();
+
+      if (!result || result.length === 0) {
+        throw new APIError('Item not found or already deleted', 404);
+      }
+    } else {
+      // Hard delete: Physically remove from database
+      result = await transaction
+        .delete(this.table)
+        .where(eq(this.getPrimaryKeyColumn(), parsedId))
+        .returning();
+
+      if (!result || result.length === 0) {
+        throw new APIError('Item not found or already deleted', 404);
+      }
+    }
+
+    return {
+      parsedId,
+      document: item
+    };
+  }
+
+  /**
+   * Delete multiple records with transactional safety
+   * 
+   * This method ensures that:
+   * 1. All items are deleted within a single transaction
+   * 2. If any deletion fails, all previous deletions are rolled back
+   * 3. After hooks (which may have external side effects like emails, API calls)
+   *    are only executed AFTER the transaction is successfully committed
+   * 
+   * @param ids - Array of item IDs to delete
+   * @param options - Operation options
+   * @returns Array of deleted item IDs
+   */
+  async deleteMany(
+    ids: (string | number)[],
+    options: OperationOptions = {}
+  ): Promise<(string | number)[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    // Create transaction if not provided
+    const transaction = options.transaction || (await createTransaction());
+    const shouldCommit = !options.transaction;
+
+    // Store results for after hooks
+    const results: {
+      parsedId: string | number;
+      document: Record<string, any>;
+    }[] = [];
+
+    try {
+      // Phase 1: Execute all core delete operations within transaction
+      for (const id of ids) {
+        const result = await this.deleteOneCore(id, transaction, options);
+        results.push(result);
+      }
+
+      // Phase 2: Commit transaction (if we created it)
+      if (shouldCommit) {
+        await transaction.commit();
+      }
+
+      // Phase 3: Execute after hooks AFTER successful commit
+      for (const result of results) {
+        // Create audit log
+        await this.createAuditLog('delete', result.parsedId, {
+          before: result.document,
+          after: null
+        }, options.transaction);
+
+        // Execute after-delete hooks
+        await hooksManager.executeHooks(
+          this.collection,
+          'items.delete.after',
+          this.accountability,
+          { id: result.parsedId, document: result.document, transaction: options.transaction }
+        );
+      }
+
+      // Invalidate cache for this collection
+      await this.invalidateCache();
+
+      return results.map(r => r.parsedId);
+    } catch (error) {
+      console.error('Error in deleteMany:', error);
+
+      if (shouldCommit) {
+        try {
+          await transaction.rollback();
+        } catch (rollbackError: any) {
           if (rollbackError.message !== '__ROLLBACK__') {
             console.error('Error during rollback:', rollbackError);
           }
@@ -2255,186 +2674,51 @@ export class ItemsService {
 
   /**
    * Delete a record by ID
+   * Uses deleteOneCore for the transactional logic and executes after hooks after commit
    */
   async deleteOne(
     id: string | number,
     options: OperationOptions = {}
   ): Promise<string | number> {
-    const parsedId = this.parseId(id);
-
     // Create transaction if not provided (matches Sequelize pattern)
     const transaction = options.transaction || (await createTransaction());
+    const shouldCommit = !options.transaction;
 
     try {
-      // Execute before-delete hooks with transaction
-      let hookData = await hooksManager.executeHooks(
-        this.collection,
-        'items.delete',
-        this.accountability,
-        { id: parsedId, transaction: options.transaction }
-      );
-
-      const isAdmin = await this.isAdministrator();
-
-      // Check permission
-      if (!options.bypassPermissions && !isAdmin) {
-        const roleId = await this.getRoleId();
-        const hasPermission = await permissionService.canAccess(
-          roleId,
-          this.collection,
-          'delete'
-        );
-
-        if (!hasPermission) {
-          throw new APIError("You don't have permission to delete this item", 403);
-        }
-      }
-
-      // Build filter for existing record check
-      let filter: FilterObject = {
-        [this.primaryKey]: parsedId
-      };
-
-      if (!options.bypassPermissions && !isAdmin) {
-        const roleId = await this.getRoleId();
-        const permissionFilter = await permissionService.getFilter(
-          roleId,
-          this.collection,
-          'delete',
-          this.accountability
-        );
-
-        if (permissionFilter.conditions) {
-          filter = combineFilters(filter, permissionFilter.conditions);
-        }
-      }
-
-      filter = await this.enforceTenantContextFilter(filter);
-
-      // Resolve dynamic variables in filter (e.g., $CURRENT_USER.id)
-      filter = await resolveDynamicVariables(filter, this.accountability);
-
-      // Check if record exists and user has permission
-      const filterJoins: any[] = [];
-      const whereClause = drizzleWhere(filter, {
-        table: this.table,
-        tableName: this.collection,
-        schema: this.table as any, // Pass table columns as schema
-        joins: filterJoins,
-        forPermissionCheck: true // Use INNER JOINs to ensure related records exist
-      });
-
-      // Deduplicate filter joins by alias
-      const uniqueJoins: any[] = [];
-      const seenAliases = new Set<string>();
-      for (const join of filterJoins) {
-        if (!seenAliases.has(join.alias)) {
-          seenAliases.add(join.alias);
-          uniqueJoins.push(join);
-        }
-      }
-      filterJoins.length = 0;
-      filterJoins.push(...uniqueJoins);
-
-      let existingItems;
-      if (filterJoins.length > 0) {
-        // Build Drizzle query with JOINs using query builder methods
-        // apply joins dynamically then add WHERE clause
-        let query: any = db.select().from(this.table);
-
-        // Apply each join using Drizzle's join methods
-        filterJoins.forEach((join) => {
-          const { table: joinTable, condition, type = 'left' } = join;
-          const joinMethod = type === 'inner' ? 'innerJoin' : 'leftJoin';
-          query = query[joinMethod](joinTable, condition);
-        });
-
-        // Apply WHERE clause and limit
-        existingItems = await query.where(whereClause).limit(1);
-      } else {
-        // Simple query without joins
-        existingItems = await db
-          .select()
-          .from(this.table)
-          .where(whereClause)
-          .limit(1);
-      }
-
-      if (!existingItems || existingItems.length === 0) {
-        throw new APIError("Item not found or you don't have permission to delete it", 403);
-      }
-
-      const item = existingItems[0];
-
-      // Handle related records cleanup based on onDelete settings
-      await handleRelatedRecordsBeforeDelete(item, this, transaction);
-
-      // Check if paranoid mode is enabled
-      const isParanoid = schemaManager.isParanoid(this.collection);
-      const forceDelete = options.force === true;
-
-      let result;
-
-      if (isParanoid && !forceDelete) {
-        // Soft delete: Set deletedAt timestamp
-        const userId = this.accountability?.user?.id;
-        const softDeleteData = softDelete(userId ? String(userId) : undefined);
-
-        result = await transaction
-          .update(this.table)
-          .set(softDeleteData)
-          .where(eq(this.getPrimaryKeyColumn(), parsedId))
-          .returning();
-
-        if (!result || result.length === 0) {
-          throw new APIError('Item not found or already deleted', 404);
-        }
-      } else {
-        // Hard delete: Physically remove from database
-        result = await transaction
-          .delete(this.table)
-          .where(eq(this.getPrimaryKeyColumn(), parsedId))
-          .returning();
-
-        if (!result || result.length === 0) {
-          throw new APIError('Item not found or already deleted', 404);
-        }
-      }
+      // Execute core delete logic within transaction
+      const result = await this.deleteOneCore(id, transaction, options);
 
       // Commit transaction if we created it
-      if (!options.transaction) {
+      if (shouldCommit) {
         await transaction.commit();
       }
 
-      // Create audit log for delete action
-      await this.createAuditLog('delete', parsedId, {
-        before: item,
+      // Create audit log for delete action (after commit)
+      await this.createAuditLog('delete', result.parsedId, {
+        before: result.document,
         after: null
       }, options.transaction);
 
-      // Execute after-delete hooks with transaction
-      hookData = await hooksManager.executeHooks(
+      // Execute after-delete hooks (after commit to prevent side effects on rollback)
+      await hooksManager.executeHooks(
         this.collection,
         'items.delete.after',
         this.accountability,
-        { id: parsedId, document: item, transaction: options.transaction }
+        { id: result.parsedId, document: result.document, transaction: options.transaction }
       );
 
       // Invalidate cache for this collection
-      // handleRelatedRecordsBeforeDelete may have deleted related records,
-      // so we need to invalidate cache for all related tables as well
       await this.invalidateCache();
 
-      return parsedId;
+      return result.parsedId;
     } catch (error) {
       console.error('Error in deleteOne:', error);
 
       // Rollback transaction if we created it
-      if (!options.transaction) {
+      if (shouldCommit) {
         try {
           await transaction.rollback();
         } catch (rollbackError: any) {
-          // Ignore __ROLLBACK__ errors as they're intentional
           if (rollbackError.message !== '__ROLLBACK__') {
             console.error('Error during rollback:', rollbackError);
           }
