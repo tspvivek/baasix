@@ -1,5 +1,5 @@
 // Import from the installed package
-import { APIError } from "@tspvivek/baasix-drizzle";
+import { APIError } from "@tspvivek/baasix";
 
 const registerEndpoint = (app, context) => {
   app.get("/user-info", async (req, res, next) => {

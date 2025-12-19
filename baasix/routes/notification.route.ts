@@ -1,16 +1,14 @@
 import { Express } from "express";
 import NotificationService from "../services/NotificationService.js";
-import { APIError } from "../utils/errorHandler.js";
 import { parseQueryParams } from "../utils/router.js";
 import { adminOnly } from "../utils/auth.js";
+import { requireAuth } from "../utils/common.js";
 
 const registerEndpoint = (app: Express) => {
   // Get user's notifications with pagination and filtering
   app.get("/notifications", async (req, res, next) => {
     try {
-      if (!req.accountability?.user?.id) {
-        throw new APIError("Authentication required", 401);
-      }
+      requireAuth(req);
 
       const notificationService = new NotificationService({
         accountability: req.accountability,
@@ -37,9 +35,7 @@ const registerEndpoint = (app: Express) => {
   // Get unread notifications count
   app.get("/notifications/unread/count", async (req, res, next) => {
     try {
-      if (!req.accountability?.user?.id) {
-        throw new APIError("Authentication required", 401);
-      }
+      requireAuth(req);
 
       const notificationService = new NotificationService({
         accountability: req.accountability,
@@ -55,9 +51,7 @@ const registerEndpoint = (app: Express) => {
   // Mark notifications as seen
   app.post("/notifications/mark-seen", async (req, res, next) => {
     try {
-      if (!req.accountability?.user?.id) {
-        throw new APIError("Authentication required", 401);
-      }
+      requireAuth(req);
 
       const { notificationIds } = req.body; // Optional array of specific notification IDs
 
@@ -79,9 +73,7 @@ const registerEndpoint = (app: Express) => {
   // Delete notifications
   app.delete("/notifications", async (req, res, next) => {
     try {
-      if (!req.accountability?.user?.id) {
-        throw new APIError("Authentication required", 401);
-      }
+      requireAuth(req);
 
       const { notificationIds } = req.body; // Optional array of specific notification IDs
 

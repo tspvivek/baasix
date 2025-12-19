@@ -6,42 +6,16 @@ import { APIError } from "../utils/errorHandler.js";
 import fileUpload from "express-fileupload";
 import { parse } from "csv-parse/sync";
 import { validateFileType, processCSVSpecificFields, processJSONSpecificFields } from "../utils/importUtils.js";
-import settingsService from "../services/SettingsService.js";
 import { invalidateCorsCache } from "../app.js";
 import { db } from "../utils/db.js";
+import {
+  modelExistsMiddleware,
+  invalidateSettingsCache,
+  invalidateSettingsCacheAfterImport,
+  getImportAccountability,
+} from "../utils/common.js";
 
 const registerEndpoint = (app: Express) => {
-  // Helper function to invalidate settings cache when baasix_Settings is modified
-  const invalidateSettingsCache = async (collection: string, item: any) => {
-    if (collection === "baasix_Settings") {
-      try {
-        const tenantId = item?.tenant_Id;
-        console.info(
-          `Settings modified - invalidating cache for tenant: ${tenantId || "global"}`
-        );
-
-        if (tenantId) {
-          await settingsService.invalidateTenantCache(tenantId);
-        } else {
-          await settingsService.loadGlobalSettings();
-          await settingsService.invalidateAllCaches();
-        }
-
-        invalidateCorsCache();
-      } catch (error: any) {
-        console.error("Error invalidating settings cache:", error);
-      }
-    }
-  };
-
-  // Middleware to check if model exists
-  const modelExistsMiddleware = (req: any, res: any, next: any) => {
-    const modelName = req.params.collection;
-    if (!schemaManager.modelExists(modelName)) {
-      return next(new APIError(`Model ${modelName} not found`, 404));
-    }
-    next();
-  };
 
   // GET all items
   app.get("/items/:collection", modelExistsMiddleware, async (req, res, next) => {
@@ -94,7 +68,7 @@ const registerEndpoint = (app: Express) => {
       // Invalidate settings cache if needed
       if (collection === "baasix_Settings") {
         const createdItem = await itemsService.readOne(newItemId);
-        await invalidateSettingsCache(collection, createdItem);
+        await invalidateSettingsCache(createdItem, invalidateCorsCache);
       }
 
       res.status(201).json({ data: { id: newItemId } });
@@ -118,7 +92,7 @@ const registerEndpoint = (app: Express) => {
       // Invalidate settings cache if needed
       if (collection === "baasix_Settings") {
         const updatedItem = await itemsService.readOne(updatedItemId);
-        await invalidateSettingsCache(collection, updatedItem);
+        await invalidateSettingsCache(updatedItem, invalidateCorsCache);
       }
 
       res.json({ data: { id: updatedItemId } });
@@ -150,7 +124,7 @@ const registerEndpoint = (app: Express) => {
 
       // Invalidate settings cache if needed
       if (collection === "baasix_Settings" && itemToDelete) {
-        await invalidateSettingsCache(collection, itemToDelete);
+        await invalidateSettingsCache(itemToDelete, invalidateCorsCache);
       }
 
       res.json({ data: { id: deletedItemId } });
@@ -248,15 +222,7 @@ const registerEndpoint = (app: Express) => {
         const csvFile = validateFileType((req as any).files?.csvFile, [".csv"], ["text/csv"], "CSV");
 
         // Handle tenant parameter for admin users only
-        let accountability = req.accountability;
-        if (tenant && (req.accountability?.role as any)?.name === "administrator") {
-          accountability = {
-            ...req.accountability,
-            tenant: tenant,
-          };
-        } else if (tenant && (req.accountability?.role as any)?.name !== "administrator") {
-          throw new APIError("Only administrators can specify tenant for import", 403);
-        }
+        const accountability = getImportAccountability(req, tenant);
 
         const itemsService = new ItemsService(collection, {
           accountability: accountability as any,
@@ -326,9 +292,7 @@ const registerEndpoint = (app: Express) => {
 
         // Invalidate settings cache if baasix_Settings was imported
         if (collection === "baasix_Settings") {
-          console.info(`Settings imported via CSV - invalidating all caches`);
-          await settingsService.loadGlobalSettings();
-          await settingsService.invalidateAllCaches();
+          await invalidateSettingsCacheAfterImport();
         }
 
         res.json({
@@ -356,15 +320,7 @@ const registerEndpoint = (app: Express) => {
         const jsonFile = validateFileType((req as any).files?.jsonFile, [".json"], ["application/json"], "JSON");
 
         // Handle tenant parameter for admin users only
-        let accountability = req.accountability;
-        if (tenant && (req.accountability?.role as any)?.name === "administrator") {
-          accountability = {
-            ...req.accountability,
-            tenant: tenant,
-          };
-        } else if (tenant && (req.accountability?.role as any)?.name !== "administrator") {
-          throw new APIError("Only administrators can specify tenant for import", 403);
-        }
+        const accountability = getImportAccountability(req, tenant);
 
         const itemsService = new ItemsService(collection, {
           accountability: accountability as any,
@@ -441,9 +397,7 @@ const registerEndpoint = (app: Express) => {
 
         // Invalidate settings cache if baasix_Settings was imported
         if (collection === "baasix_Settings") {
-          console.info(`Settings imported via JSON - invalidating all caches`);
-          await settingsService.loadGlobalSettings();
-          await settingsService.invalidateAllCaches();
+          await invalidateSettingsCacheAfterImport();
         }
 
         res.json({

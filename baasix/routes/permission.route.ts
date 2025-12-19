@@ -3,42 +3,7 @@ import permissionService from "../services/PermissionService.js";
 import ItemsService from "../services/ItemsService.js";
 import { adminOnly } from "../utils/auth.js";
 import { APIError } from "../utils/errorHandler.js";
-import { getCacheService } from "../utils/db.js";
-import { getCache } from "../utils/cache.js";
-
-/**
- * Helper function to invalidate cache for affected collections when permissions change
- */
-async function invalidateCollectionCache(collection: string): Promise<void> {
-  try {
-    const cache = getCacheService();
-    if (cache) {
-      await cache.onMutate({ tables: [collection] });
-    }
-  } catch (error) {
-    console.error(`[PermissionRoute] Failed to invalidate cache for ${collection}:`, error);
-  }
-}
-
-/**
- * Invalidate auth cache for a specific role when permissions change
- * This ensures getRolesAndPermissions() gets fresh data
- */
-async function invalidateAuthCache(role_Id?: string): Promise<void> {
-  try {
-    const cache = getCache();
-    if (role_Id) {
-      // Invalidate specific role's auth cache
-      const cacheKey = `auth:role:${role_Id}:permissions`;
-      await cache.delete(cacheKey);
-    } else {
-      // Invalidate all auth role caches
-      await cache.invalidateModel("auth");
-    }
-  } catch (error) {
-    console.error(`[PermissionRoute] Failed to invalidate auth cache:`, error);
-  }
-}
+import { invalidateAuthCache, invalidateCollectionCache } from "../utils/common.js";
 
 const registerEndpoint = (app: Express) => {
   // Get all permissions

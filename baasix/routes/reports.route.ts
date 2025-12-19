@@ -4,15 +4,9 @@ import StatsService from "../services/StatsService.js";
 import { schemaManager } from "../utils/schemaManager.js";
 import { parseQueryParams } from "../utils/router.js";
 import { APIError } from "../utils/errorHandler.js";
+import { modelExistsMiddleware } from "../utils/common.js";
 
 const registerEndpoint = (app: Express) => {
-  const modelExistsMiddleware = (req: any, res: any, next: any) => {
-    const modelName = req.params.collection;
-    if (!schemaManager.modelExists(modelName)) {
-      return next(new APIError(`Model ${modelName} not found`, 404));
-    }
-    next();
-  };
 
   // Stats endpoint - GET method - handles multiple queries for different collections
   app.get("/reports/stats", async (req, res, next) => {

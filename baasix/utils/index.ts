@@ -108,6 +108,17 @@ export type { SortOptions, SortResult } from './sortUtils.js';
 // Error handling utilities
 export { APIError, errorHandler } from './errorHandler.js';
 
+// Common utilities (shared across routes)
+export {
+  modelExistsMiddleware,
+  requireAuth,
+  getImportAccountability,
+  invalidateAuthCache,
+  invalidateCollectionCache,
+  invalidateSettingsCache,
+  invalidateSettingsCacheAfterImport,
+} from './common.js';
+
 /**
  * USAGE EXAMPLES
  * ==============
