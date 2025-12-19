@@ -11,6 +11,7 @@
  * - Range operators (between, notBetween)
  * - Null checks (isNull, isNotNull)
  * - Array operators (arraycontains, arraycontained)
+ * - JSONB operators (jsonbContains, jsonbHasKey, jsonbPathExists, etc.)
  * - Geo/spatial operators (within, contains, intersects, dwithin)
  * - Column-to-column comparisons with $COL() syntax
  * - Type casting with PostgreSQL :: syntax
@@ -747,6 +748,387 @@ export function arrayContainedOperator(
   return sql.raw(`${columnSQL} <@ ${formattedArrayDirect}`);
 }
 
+// ============================================================================
+// JSONB OPERATORS
+// PostgreSQL provides powerful JSONB operators for querying JSON data.
+// These operators allow filtering based on JSON structure and contents.
+// ============================================================================
+
+/**
+ * Helper to build field reference for JSONB operations
+ */
+function buildFieldRef(fieldName: string): string {
+  if (fieldName.startsWith('"')) {
+    return fieldName;
+  } else if (fieldName.includes('.')) {
+    const [table, col] = fieldName.split('.');
+    return `"${table}"."${col}"`;
+  } else {
+    return `"${fieldName}"`;
+  }
+}
+
+/**
+ * Safely escape and stringify JSON value for SQL
+ */
+function jsonToSqlString(value: any): string {
+  return JSON.stringify(value).replace(/'/g, "''");
+}
+
+/**
+ * Operator: JSONB Contains (@>)
+ * Checks if the JSONB column contains the specified JSON value
+ * Example: { metadata: { jsonbContains: { status: "active" } } }
+ * PostgreSQL: metadata @> '{"status": "active"}'::jsonb
+ * 
+ * This operator tests whether the left JSONB value contains the right JSONB value.
+ * A JSONB value contains another if it has all the keys and matching values.
+ */
+export function jsonbContainsOperator(ctx: OperatorContext, value: any): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const jsonValue = jsonToSqlString(value);
+  return sql.raw(`${fieldRef} @> '${jsonValue}'::jsonb`);
+}
+
+/**
+ * Operator: JSONB Contained By (<@)
+ * Checks if the JSONB column is contained by the specified JSON value
+ * Example: { metadata: { jsonbContainedBy: { status: "active", type: "user", role: "admin" } } }
+ * PostgreSQL: metadata <@ '{"status": "active", "type": "user", "role": "admin"}'::jsonb
+ * 
+ * This operator tests whether the left JSONB value is contained by the right JSONB value.
+ */
+export function jsonbContainedByOperator(ctx: OperatorContext, value: any): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const jsonValue = jsonToSqlString(value);
+  return sql.raw(`${fieldRef} <@ '${jsonValue}'::jsonb`);
+}
+
+/**
+ * Operator: JSONB Has Key (?)
+ * Checks if the JSONB column has a specific top-level key
+ * Example: { metadata: { jsonbHasKey: "status" } }
+ * PostgreSQL: metadata ? 'status'
+ */
+export function jsonbHasKeyOperator(ctx: OperatorContext, value: string): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedKey = String(value).replace(/'/g, "''");
+  return sql.raw(`${fieldRef} ? '${escapedKey}'`);
+}
+
+/**
+ * Operator: JSONB Has Any Keys (?|)
+ * Checks if the JSONB column has any of the specified keys
+ * Example: { metadata: { jsonbHasAnyKeys: ["status", "type", "role"] } }
+ * PostgreSQL: metadata ?| array['status', 'type', 'role']
+ */
+export function jsonbHasAnyKeysOperator(ctx: OperatorContext, value: string[]): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const keys = Array.isArray(value) ? value : [value];
+  const escapedKeys = keys.map(k => `'${String(k).replace(/'/g, "''")}'`).join(', ');
+  return sql.raw(`${fieldRef} ?| array[${escapedKeys}]`);
+}
+
+/**
+ * Operator: JSONB Has All Keys (?&)
+ * Checks if the JSONB column has all of the specified keys
+ * Example: { metadata: { jsonbHasAllKeys: ["status", "type"] } }
+ * PostgreSQL: metadata ?& array['status', 'type']
+ */
+export function jsonbHasAllKeysOperator(ctx: OperatorContext, value: string[]): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const keys = Array.isArray(value) ? value : [value];
+  const escapedKeys = keys.map(k => `'${String(k).replace(/'/g, "''")}'`).join(', ');
+  return sql.raw(`${fieldRef} ?& array[${escapedKeys}]`);
+}
+
+/**
+ * Operator: JSONB Path Exists (using @?)
+ * Checks if a JSON path exists and returns any items
+ * Example: { metadata: { jsonbPathExists: "$.user.preferences" } }
+ * PostgreSQL: metadata @? '$.user.preferences'
+ * 
+ * This uses the JSON path language to query JSONB data.
+ * The path can include filters like: $.items[*] ? (@.price > 10)
+ */
+export function jsonbPathExistsOperator(ctx: OperatorContext, value: string): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedPath = String(value).replace(/'/g, "''");
+  return sql.raw(`${fieldRef} @? '${escapedPath}'`);
+}
+
+/**
+ * Operator: JSONB Path Match (using @@)
+ * Checks if a JSON path predicate returns true
+ * Example: { metadata: { jsonbPathMatch: "$.price > 10" } }
+ * PostgreSQL: metadata @@ '$.price > 10'
+ * 
+ * The path predicate must return a boolean value.
+ */
+export function jsonbPathMatchOperator(ctx: OperatorContext, value: string): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedPath = String(value).replace(/'/g, "''");
+  return sql.raw(`${fieldRef} @@ '${escapedPath}'`);
+}
+
+/**
+ * Operator: JSONB Not Contains (NOT @>)
+ * Checks if the JSONB column does NOT contain the specified JSON value
+ * Example: { metadata: { jsonbNotContains: { status: "deleted" } } }
+ * PostgreSQL: NOT (metadata @> '{"status": "deleted"}'::jsonb)
+ */
+export function jsonbNotContainsOperator(ctx: OperatorContext, value: any): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const jsonValue = jsonToSqlString(value);
+  return sql.raw(`NOT (${fieldRef} @> '${jsonValue}'::jsonb)`);
+}
+
+/**
+ * Operator: JSONB Key Equals (->>, then compare)
+ * Access a top-level key and compare its text value
+ * Example: { metadata: { jsonbKeyEquals: { key: "status", value: "active" } } }
+ * PostgreSQL: metadata->>'status' = 'active'
+ * 
+ * This is useful when you want to compare a specific key's value directly.
+ */
+export function jsonbKeyEqualsOperator(ctx: OperatorContext, value: { key: string; value: any }): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedKey = String(value.key).replace(/'/g, "''");
+  
+  if (value.value === null) {
+    return sql.raw(`${fieldRef}->>'${escapedKey}' IS NULL`);
+  }
+  
+  if (typeof value.value === 'number') {
+    return sql.raw(`(${fieldRef}->>'${escapedKey}')::numeric = ${value.value}`);
+  }
+  
+  if (typeof value.value === 'boolean') {
+    return sql.raw(`(${fieldRef}->>'${escapedKey}')::boolean = ${value.value}`);
+  }
+  
+  const escapedValue = String(value.value).replace(/'/g, "''");
+  return sql.raw(`${fieldRef}->>'${escapedKey}' = '${escapedValue}'`);
+}
+
+/**
+ * Operator: JSONB Key Not Equals (->>, then compare)
+ * Access a top-level key and compare its text value is NOT equal
+ * Example: { metadata: { jsonbKeyNotEquals: { key: "status", value: "deleted" } } }
+ * PostgreSQL: metadata->>'status' != 'deleted' OR metadata->>'status' IS NULL
+ */
+export function jsonbKeyNotEqualsOperator(ctx: OperatorContext, value: { key: string; value: any }): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedKey = String(value.key).replace(/'/g, "''");
+  
+  if (value.value === null) {
+    return sql.raw(`${fieldRef}->>'${escapedKey}' IS NOT NULL`);
+  }
+  
+  if (typeof value.value === 'number') {
+    return sql.raw(`(${fieldRef}->>'${escapedKey}')::numeric != ${value.value} OR ${fieldRef}->>'${escapedKey}' IS NULL`);
+  }
+  
+  if (typeof value.value === 'boolean') {
+    return sql.raw(`(${fieldRef}->>'${escapedKey}')::boolean != ${value.value} OR ${fieldRef}->>'${escapedKey}' IS NULL`);
+  }
+  
+  const escapedValue = String(value.value).replace(/'/g, "''");
+  return sql.raw(`${fieldRef}->>'${escapedKey}' != '${escapedValue}' OR ${fieldRef}->>'${escapedKey}' IS NULL`);
+}
+
+/**
+ * Operator: JSONB Key Greater Than
+ * Access a top-level key and compare if value is greater than
+ * Example: { metadata: { jsonbKeyGt: { key: "price", value: 100 } } }
+ * PostgreSQL: (metadata->>'price')::numeric > 100
+ */
+export function jsonbKeyGtOperator(ctx: OperatorContext, value: { key: string; value: number }): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedKey = String(value.key).replace(/'/g, "''");
+  return sql.raw(`(${fieldRef}->>'${escapedKey}')::numeric > ${value.value}`);
+}
+
+/**
+ * Operator: JSONB Key Greater Than or Equal
+ * Example: { metadata: { jsonbKeyGte: { key: "price", value: 100 } } }
+ */
+export function jsonbKeyGteOperator(ctx: OperatorContext, value: { key: string; value: number }): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedKey = String(value.key).replace(/'/g, "''");
+  return sql.raw(`(${fieldRef}->>'${escapedKey}')::numeric >= ${value.value}`);
+}
+
+/**
+ * Operator: JSONB Key Less Than
+ * Example: { metadata: { jsonbKeyLt: { key: "price", value: 100 } } }
+ */
+export function jsonbKeyLtOperator(ctx: OperatorContext, value: { key: string; value: number }): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedKey = String(value.key).replace(/'/g, "''");
+  return sql.raw(`(${fieldRef}->>'${escapedKey}')::numeric < ${value.value}`);
+}
+
+/**
+ * Operator: JSONB Key Less Than or Equal
+ * Example: { metadata: { jsonbKeyLte: { key: "price", value: 100 } } }
+ */
+export function jsonbKeyLteOperator(ctx: OperatorContext, value: { key: string; value: number }): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedKey = String(value.key).replace(/'/g, "''");
+  return sql.raw(`(${fieldRef}->>'${escapedKey}')::numeric <= ${value.value}`);
+}
+
+/**
+ * Operator: JSONB Key In (->>, then IN)
+ * Access a top-level key and check if value is in a list
+ * Example: { metadata: { jsonbKeyIn: { key: "status", values: ["active", "pending"] } } }
+ * PostgreSQL: metadata->>'status' IN ('active', 'pending')
+ */
+export function jsonbKeyInOperator(ctx: OperatorContext, value: { key: string; values: any[] }): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedKey = String(value.key).replace(/'/g, "''");
+  const values = Array.isArray(value.values) ? value.values : [value.values];
+  const escapedValues = values.map(v => `'${String(v).replace(/'/g, "''")}'`).join(', ');
+  return sql.raw(`${fieldRef}->>'${escapedKey}' IN (${escapedValues})`);
+}
+
+/**
+ * Operator: JSONB Key Not In
+ * Example: { metadata: { jsonbKeyNotIn: { key: "status", values: ["deleted", "archived"] } } }
+ */
+export function jsonbKeyNotInOperator(ctx: OperatorContext, value: { key: string; values: any[] }): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedKey = String(value.key).replace(/'/g, "''");
+  const values = Array.isArray(value.values) ? value.values : [value.values];
+  const escapedValues = values.map(v => `'${String(v).replace(/'/g, "''")}'`).join(', ');
+  return sql.raw(`${fieldRef}->>'${escapedKey}' NOT IN (${escapedValues})`);
+}
+
+/**
+ * Operator: JSONB Key Like (->>, then ILIKE)
+ * Access a top-level key and perform pattern matching
+ * Example: { metadata: { jsonbKeyLike: { key: "name", pattern: "%john%" } } }
+ * PostgreSQL: metadata->>'name' ILIKE '%john%'
+ */
+export function jsonbKeyLikeOperator(ctx: OperatorContext, value: { key: string; pattern: string }): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedKey = String(value.key).replace(/'/g, "''");
+  const escapedPattern = String(value.pattern).replace(/'/g, "''");
+  return sql.raw(`${fieldRef}->>'${escapedKey}' ILIKE '${escapedPattern}'`);
+}
+
+/**
+ * Operator: JSONB Key Is Null
+ * Check if a specific key's value is null (not if the key is missing)
+ * Example: { metadata: { jsonbKeyIsNull: "deletedAt" } }
+ * PostgreSQL: metadata->>'deletedAt' IS NULL
+ */
+export function jsonbKeyIsNullOperator(ctx: OperatorContext, value: string): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedKey = String(value).replace(/'/g, "''");
+  return sql.raw(`${fieldRef}->>'${escapedKey}' IS NULL`);
+}
+
+/**
+ * Operator: JSONB Key Is Not Null
+ * Check if a specific key's value is not null
+ * Example: { metadata: { jsonbKeyIsNotNull: "createdAt" } }
+ * PostgreSQL: metadata->>'createdAt' IS NOT NULL
+ */
+export function jsonbKeyIsNotNullOperator(ctx: OperatorContext, value: string): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedKey = String(value).replace(/'/g, "''");
+  return sql.raw(`${fieldRef}->>'${escapedKey}' IS NOT NULL`);
+}
+
+/**
+ * Operator: JSONB Array Length
+ * Check the length of a JSONB array at a specific path
+ * Example: { metadata: { jsonbArrayLength: { path: "items", op: "gte", value: 5 } } }
+ * PostgreSQL: jsonb_array_length(metadata->'items') >= 5
+ */
+export function jsonbArrayLengthOperator(ctx: OperatorContext, value: { path?: string; op: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte'; value: number }): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const operators: Record<string, string> = {
+    eq: '=',
+    ne: '!=',
+    gt: '>',
+    gte: '>=',
+    lt: '<',
+    lte: '<='
+  };
+  const sqlOp = operators[value.op] || '=';
+  
+  if (value.path) {
+    const escapedPath = String(value.path).replace(/'/g, "''");
+    return sql.raw(`jsonb_array_length(${fieldRef}->'${escapedPath}') ${sqlOp} ${value.value}`);
+  }
+  
+  // If no path, assume the column itself is the array
+  return sql.raw(`jsonb_array_length(${fieldRef}) ${sqlOp} ${value.value}`);
+}
+
+/**
+ * Operator: JSONB Type Of
+ * Check the type of a JSONB value or a key's value
+ * Example: { metadata: { jsonbTypeOf: { path: "price", type: "number" } } }
+ * PostgreSQL: jsonb_typeof(metadata->'price') = 'number'
+ * 
+ * Valid types: 'object', 'array', 'string', 'number', 'boolean', 'null'
+ */
+export function jsonbTypeOfOperator(ctx: OperatorContext, value: { path?: string; type: string }): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const escapedType = String(value.type).replace(/'/g, "''");
+  
+  if (value.path) {
+    const escapedPath = String(value.path).replace(/'/g, "''");
+    return sql.raw(`jsonb_typeof(${fieldRef}->'${escapedPath}') = '${escapedType}'`);
+  }
+  
+  return sql.raw(`jsonb_typeof(${fieldRef}) = '${escapedType}'`);
+}
+
+/**
+ * Operator: JSONB Deep Value (using #>> for nested path)
+ * Access a deeply nested value and compare
+ * Example: { metadata: { jsonbDeepValue: { path: ["user", "preferences", "theme"], value: "dark" } } }
+ * PostgreSQL: metadata #>> '{user,preferences,theme}' = 'dark'
+ * 
+ * The path array represents the keys to traverse.
+ */
+export function jsonbDeepValueOperator(ctx: OperatorContext, value: { path: string[]; value: any; op?: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'like' | 'ilike' }): SQL {
+  const fieldRef = buildFieldRef(ctx.fieldName);
+  const pathArray = Array.isArray(value.path) ? value.path : [value.path];
+  const escapedPath = pathArray.map(p => String(p).replace(/"/g, '\\"')).join(',');
+  const op = value.op || 'eq';
+  
+  const operators: Record<string, string> = {
+    eq: '=',
+    ne: '!=',
+    gt: '>',
+    gte: '>=',
+    lt: '<',
+    lte: '<=',
+    like: 'LIKE',
+    ilike: 'ILIKE'
+  };
+  const sqlOp = operators[op] || '=';
+  
+  if (value.value === null) {
+    return op === 'ne' 
+      ? sql.raw(`${fieldRef} #>> '{${escapedPath}}' IS NOT NULL`)
+      : sql.raw(`${fieldRef} #>> '{${escapedPath}}' IS NULL`);
+  }
+  
+  if (typeof value.value === 'number' && !['like', 'ilike'].includes(op)) {
+    return sql.raw(`(${fieldRef} #>> '{${escapedPath}}')::numeric ${sqlOp} ${value.value}`);
+  }
+  
+  const escapedValue = String(value.value).replace(/'/g, "''");
+  return sql.raw(`${fieldRef} #>> '{${escapedPath}}' ${sqlOp} '${escapedValue}'`);
+}
+
 /**
  * Operator: ST_Within (geometry within)
  * Example: { location: { within: geoJSON } }
@@ -934,6 +1316,30 @@ export const OPERATOR_MAP = {
   // Array operators
   arraycontains: arrayContainsOperator,
   arraycontained: arrayContainedOperator,
+  
+  // JSONB operators
+  jsonbContains: jsonbContainsOperator,
+  jsonbContainedBy: jsonbContainedByOperator,
+  jsonbHasKey: jsonbHasKeyOperator,
+  jsonbHasAnyKeys: jsonbHasAnyKeysOperator,
+  jsonbHasAllKeys: jsonbHasAllKeysOperator,
+  jsonbPathExists: jsonbPathExistsOperator,
+  jsonbPathMatch: jsonbPathMatchOperator,
+  jsonbNotContains: jsonbNotContainsOperator,
+  jsonbKeyEquals: jsonbKeyEqualsOperator,
+  jsonbKeyNotEquals: jsonbKeyNotEqualsOperator,
+  jsonbKeyGt: jsonbKeyGtOperator,
+  jsonbKeyGte: jsonbKeyGteOperator,
+  jsonbKeyLt: jsonbKeyLtOperator,
+  jsonbKeyLte: jsonbKeyLteOperator,
+  jsonbKeyIn: jsonbKeyInOperator,
+  jsonbKeyNotIn: jsonbKeyNotInOperator,
+  jsonbKeyLike: jsonbKeyLikeOperator,
+  jsonbKeyIsNull: jsonbKeyIsNullOperator,
+  jsonbKeyIsNotNull: jsonbKeyIsNotNullOperator,
+  jsonbArrayLength: jsonbArrayLengthOperator,
+  jsonbTypeOf: jsonbTypeOfOperator,
+  jsonbDeepValue: jsonbDeepValueOperator,
   
   // Geo operators
   within: withinOperator,

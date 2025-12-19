@@ -55,12 +55,28 @@ export interface OperatorContext {
  * Full type definition is generated there.
  */
 export type OperatorName =
+  // Comparison operators
   | 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte'
-  | 'in' | 'nin' | 'like' | 'ilike' | 'nlike' | 'nilike'
-  | 'between' | 'nbetween' | 'null' | 'nnull' | 'empty' | 'nempty'
-  | 'contains' | 'ncontains' | 'starts_with' | 'nstarts_with'
-  | 'ends_with' | 'nends_with' | 'regex' | 'intersects'
-  | 'nintersects' | 'intersects_bbox' | 'nintersects_bbox';
+  // String pattern matching
+  | 'like' | 'notLike' | 'iLike' | 'notILike'
+  | 'startsWith' | 'startsWiths' | 'endsWith' | 'endsWiths'
+  | 'nstartsWith' | 'nstartsWiths' | 'nendsWith' | 'nendsWiths'
+  // Collection operators
+  | 'in' | 'notIn' | 'not' | 'is'
+  // Range operators
+  | 'between' | 'notBetween'
+  // Null checks
+  | 'isNull' | 'isNotNull'
+  // Array operators
+  | 'arraycontains' | 'arraycontained'
+  // JSONB operators
+  | 'jsonbContains' | 'jsonbContainedBy' | 'jsonbHasKey' | 'jsonbHasAnyKeys' | 'jsonbHasAllKeys'
+  | 'jsonbPathExists' | 'jsonbPathMatch' | 'jsonbNotContains'
+  | 'jsonbKeyEquals' | 'jsonbKeyNotEquals' | 'jsonbKeyGt' | 'jsonbKeyGte' | 'jsonbKeyLt' | 'jsonbKeyLte'
+  | 'jsonbKeyIn' | 'jsonbKeyNotIn' | 'jsonbKeyLike' | 'jsonbKeyIsNull' | 'jsonbKeyIsNotNull'
+  | 'jsonbArrayLength' | 'jsonbTypeOf' | 'jsonbDeepValue'
+  // Geo operators
+  | 'within' | 'containsGEO' | 'intersects' | 'nIntersects' | 'dwithin';
 
 /**
  * Pagination options
