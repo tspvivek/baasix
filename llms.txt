@@ -1,0 +1,1372 @@
+# Baasix LLMs.txt
+# Comprehensive AI-friendly documentation for Baasix Backend-as-a-Service
+# Version: 0.1.0-alpha.2
+# Package: @tspvivek/baasix
+
+> This file provides complete reference for AI assistants to help developers build applications with Baasix.
+
+## Quick Links
+- Documentation: https://baasix.com/docs
+- GitHub Sample: https://github.com/tspvivek/baasix-sample
+
+---
+
+# SECTION 1: INSTALLATION & SETUP
+
+## Minimum Setup
+
+```javascript
+// server.js
+import { startServer } from "@tspvivek/baasix";
+startServer().catch(console.error);
+```
+
+```json
+// package.json
+{
+  "type": "module",
+  "dependencies": {
+    "@tspvivek/baasix": "^0.1.0-alpha.2"
+  }
+}
+```
+
+## Required Environment Variables (.env)
+
+```env
+# Database (PostgreSQL 14+)
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=baasix
+DB_USER=postgres
+DB_PASSWORD=yourpassword
+
+# Security (REQUIRED - min 32 chars)
+SECRET_KEY=your-32-character-secret-key-here
+COOKIE_SECRET=another-32-character-secret-key
+```
+
+## Optional Environment Variables
+
+```env
+# Server
+PORT=8056                          # HTTP port
+
+# Cache (Redis 6+)
+CACHE_REDIS_URL=redis://localhost:6379
+CACHE_TTL=30000                    # Default cache TTL in ms
+
+# Multi-tenancy
+MULTI_TENANT=false                 # Enable multi-tenant mode
+
+# Real-time
+SOCKET_ENABLED=false               # Enable Socket.IO
+
+# Registration
+PUBLIC_REGISTRATION=true           # Allow public user registration
+
+# Rate Limiting
+RATE_LIMIT=100                     # Requests per interval
+RATE_LIMIT_INTERVAL=5000           # Interval in ms
+
+# File Storage
+STORAGE_LOCAL_PATH=./uploads       # Local storage path
+STORAGE_S3_BUCKET=                 # S3 bucket name
+STORAGE_S3_REGION=                 # S3 region
+STORAGE_S3_ACCESS_KEY=             # S3 access key
+STORAGE_S3_SECRET_KEY=             # S3 secret key
+
+# Email
+MAIL_HOST=                         # SMTP host
+MAIL_PORT=587                      # SMTP port
+MAIL_USER=                         # SMTP user
+MAIL_PASSWORD=                     # SMTP password
+MAIL_FROM=                         # Default sender
+```
+
+---
+
+# SECTION 2: API ROUTES REFERENCE
+
+## Authentication Routes
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| POST | /auth/register | Register new user | No |
+| POST | /auth/login | Login, returns JWT token | No |
+| GET | /auth/me | Get current authenticated user | Yes |
+| GET | /auth/logout | Logout and invalidate session | Yes |
+| POST | /auth/magiclink | Request magic link login | No |
+| POST | /auth/switch-tenant | Switch to different tenant | Yes |
+| POST | /auth/refresh | Refresh JWT token | Yes |
+| POST | /auth/forgot-password | Request password reset | No |
+| POST | /auth/reset-password | Reset password with token | No |
+
+### Authentication Examples
+
+```javascript
+// Register
+POST /auth/register
+{
+  "email": "user@example.com",
+  "password": "securepassword",
+  "firstName": "John",
+  "lastName": "Doe"
+}
+
+// Login - returns { token, user }
+POST /auth/login
+{
+  "email": "user@example.com",
+  "password": "securepassword"
+}
+
+// Use token in subsequent requests
+Authorization: Bearer <token>
+```
+
+## Items Routes (CRUD)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /items/:collection | List items with filtering, sorting, pagination |
+| GET | /items/:collection/:id | Get single item by ID |
+| POST | /items/:collection | Create single item |
+| PATCH | /items/:collection/:id | Update single item |
+| DELETE | /items/:collection/:id | Delete single item |
+| POST | /items/:collection/bulk | Bulk create multiple items |
+| PATCH | /items/:collection/bulk | Bulk update multiple items |
+| DELETE | /items/:collection/bulk | Bulk delete multiple items |
+
+## Schema Routes
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /schemas | List all schemas |
+| GET | /schemas/:collection | Get schema for collection |
+| POST | /schemas | Create new schema/collection |
+| PATCH | /schemas/:collection | Update schema |
+| DELETE | /schemas/:collection | Delete schema and table |
+| POST | /schemas/:collection/relationships | Create relationship |
+| DELETE | /schemas/:collection/relationships/:name | Delete relationship |
+| POST | /schemas/:collection/indexes | Create index |
+| DELETE | /schemas/:collection/indexes/:name | Delete index |
+
+## Files Routes
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /files | List all files |
+| GET | /files/:id | Get file metadata |
+| POST | /files | Upload file (multipart/form-data) |
+| PATCH | /files/:id | Update file metadata |
+| DELETE | /files/:id | Delete file |
+| GET | /assets/:id | Get file with transformations |
+
+### Asset Transformations (GET /assets/:id)
+
+| Parameter | Description | Values |
+|-----------|-------------|--------|
+| width | Target width | number |
+| height | Target height | number |
+| fit | Resize mode | cover, contain, fill, inside, outside |
+| quality | JPEG quality | 1-100 |
+| format | Output format | jpeg, png, webp, avif |
+
+```
+GET /assets/file-uuid?width=200&height=200&fit=cover&quality=80
+```
+
+## Workflow Routes
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /workflows | List workflows |
+| GET | /workflows/:id | Get workflow |
+| POST | /workflows | Create workflow |
+| PATCH | /workflows/:id | Update workflow |
+| DELETE | /workflows/:id | Delete workflow |
+| POST | /workflows/:id/execute | Execute workflow |
+| GET | /workflows/:id/executions | List executions |
+| POST | /workflows/:id/test | Test workflow |
+
+## Other Routes
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /permissions | List permissions |
+| POST | /permissions | Create permission |
+| GET | /notifications | Get user notifications |
+| POST | /reports/:collection | Generate report |
+| GET | /settings | Get app settings |
+| PATCH | /settings | Update settings |
+
+---
+
+# SECTION 3: QUERY PARAMETERS (GET /items/:collection)
+
+## All Parameters
+
+| Parameter | Type | Description | Example |
+|-----------|------|-------------|---------|
+| fields | string[] | Fields to return | `["id","name","author.*"]` |
+| filter | object | Filter conditions | `{"status":{"eq":"active"}}` |
+| sort | object/string[] | Sort order | `{"createdAt":"desc"}` or `["-createdAt"]` |
+| limit | number | Items per page (-1 for all) | 20 |
+| page | number | Page number (1-indexed) | 1 |
+| offset | number | Skip N records | 0 |
+| search | string | Full-text search | "keyword" |
+| searchFields | string[] | Fields to search | `["title","content"]` |
+| aggregate | object | Aggregation ops | `{"total":{"function":"count","field":"id"}}` |
+| groupBy | string[] | Group by fields | `["status","category"]` |
+| paranoid | boolean | Include soft-deleted | false |
+| relConditions | object | Filter array relations | `{"comments":{"approved":true}}` |
+
+## Field Selection Patterns
+
+```javascript
+// All direct fields
+fields: ["*"]
+
+// Specific fields
+fields: ["id", "name", "email"]
+
+// Include relation (all fields)
+fields: ["*", "author.*"]
+
+// Specific relation fields
+fields: ["*", "author.firstName", "author.email"]
+
+// Deep nesting
+fields: ["*", "posts.*", "posts.comments.*"]
+
+// Recursive expansion
+fields: ["*.*"]      // All direct + first level relations
+fields: ["*.*.*"]    // Full tree expansion
+
+// Exclude fields
+fields: ["*", "-password", "-secretKey"]
+```
+
+---
+
+# SECTION 4: COMPLETE FILTER OPERATORS
+
+## Basic Comparison Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| eq | Equal | `{"status": {"eq": "active"}}` |
+| ne | Not equal | `{"status": {"ne": "deleted"}}` |
+| gt | Greater than | `{"age": {"gt": 18}}` |
+| gte | Greater than or equal | `{"price": {"gte": 100}}` |
+| lt | Less than | `{"stock": {"lt": 10}}` |
+| lte | Less than or equal | `{"rating": {"lte": 5}}` |
+| is | IS (for null) | `{"deletedAt": {"is": null}}` |
+| not | NOT (alternative to ne) | `{"status": {"not": "spam"}}` |
+
+## Collection Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| in | Value in array | `{"status": {"in": ["active", "pending"]}}` |
+| notIn | Value not in array | `{"category": {"notIn": ["spam", "deleted"]}}` |
+
+## String Pattern Operators (Auto-wrap with %)
+
+| Operator | Description | Pattern | Example |
+|----------|-------------|---------|---------|
+| like | Case-sensitive | %value% | `{"name": {"like": "john"}}` |
+| notLike | NOT LIKE | %value% | `{"name": {"notLike": "spam"}}` |
+| iLike | Case-insensitive | %value% | `{"email": {"iLike": "GMAIL"}}` |
+| notILike | NOT ILIKE | %value% | `{"email": {"notILike": "test"}}` |
+
+## Prefix/Suffix Operators
+
+| Operator | Description | Pattern | Case |
+|----------|-------------|---------|------|
+| startsWith | Starts with | value% | Insensitive |
+| startsWiths | Starts with | value% | Sensitive |
+| endsWith | Ends with | %value | Insensitive |
+| endsWiths | Ends with | %value | Sensitive |
+| nstartsWith | NOT starts with | value% | Insensitive |
+| nstartsWiths | NOT starts with | value% | Sensitive |
+| nendsWith | NOT ends with | %value | Insensitive |
+| nendsWiths | NOT ends with | %value | Sensitive |
+
+```javascript
+// Examples
+{"name": {"startsWith": "John"}}     // John%, case-insensitive
+{"email": {"endsWith": ".edu"}}      // %.edu, case-insensitive
+{"code": {"startsWiths": "PRD"}}     // PRD%, case-sensitive
+```
+
+## Range Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| between | BETWEEN min AND max | `{"price": {"between": [10, 100]}}` |
+| notBetween | NOT BETWEEN | `{"age": {"notBetween": [0, 17]}}` |
+
+## Null Check Operators
+
+| Operator | Value | Result |
+|----------|-------|--------|
+| isNull | true | IS NULL |
+| isNull | false | IS NOT NULL |
+| isNotNull | true | IS NOT NULL |
+| isNotNull | false | IS NULL |
+
+```javascript
+{"deletedAt": {"isNull": true}}      // Not deleted
+{"avatar": {"isNotNull": true}}      // Has avatar
+```
+
+## PostgreSQL Array Operators
+
+| Operator | PostgreSQL | Description | Example |
+|----------|------------|-------------|---------|
+| arraycontains | @> | Array contains all | `{"tags": {"arraycontains": ["js", "api"]}}` |
+| arraycontained | <@ | Array contained by | `{"perms": {"arraycontained": ["read", "write", "admin"]}}` |
+
+## JSONB Operators
+
+### Containment
+| Operator | PostgreSQL | Description |
+|----------|------------|-------------|
+| jsonbContains | @> | JSONB contains object |
+| jsonbContainedBy | <@ | JSONB is contained by |
+| jsonbNotContains | NOT @> | JSONB does not contain |
+
+```javascript
+{"metadata": {"jsonbContains": {"status": "active", "type": "premium"}}}
+```
+
+### Key Existence
+| Operator | PostgreSQL | Description |
+|----------|------------|-------------|
+| jsonbHasKey | ? | Has key |
+| jsonbHasAnyKeys | ?| | Has any of keys |
+| jsonbHasAllKeys | ?& | Has all keys |
+
+```javascript
+{"metadata": {"jsonbHasKey": "discount"}}
+{"metadata": {"jsonbHasAnyKeys": ["promo", "coupon"]}}
+{"metadata": {"jsonbHasAllKeys": ["price", "stock", "sku"]}}
+```
+
+### Key Value Comparisons
+| Operator | Description | Example |
+|----------|-------------|---------|
+| jsonbKeyEquals | Key equals value | `{"metadata": {"jsonbKeyEquals": {"key": "status", "value": "active"}}}` |
+| jsonbKeyNotEquals | Key not equals | `{"metadata": {"jsonbKeyNotEquals": {"key": "status", "value": "deleted"}}}` |
+| jsonbKeyGt | Key > value | `{"metadata": {"jsonbKeyGt": {"key": "price", "value": 100}}}` |
+| jsonbKeyGte | Key >= value | `{"metadata": {"jsonbKeyGte": {"key": "stock", "value": 10}}}` |
+| jsonbKeyLt | Key < value | `{"metadata": {"jsonbKeyLt": {"key": "discount", "value": 50}}}` |
+| jsonbKeyLte | Key <= value | `{"metadata": {"jsonbKeyLte": {"key": "rating", "value": 5}}}` |
+| jsonbKeyIn | Key in list | `{"metadata": {"jsonbKeyIn": {"key": "type", "values": ["A", "B"]}}}` |
+| jsonbKeyNotIn | Key not in list | `{"metadata": {"jsonbKeyNotIn": {"key": "category", "values": ["spam"]}}}` |
+| jsonbKeyLike | Key ILIKE pattern | `{"metadata": {"jsonbKeyLike": {"key": "name", "pattern": "%test%"}}}` |
+| jsonbKeyIsNull | Key is null | `{"metadata": {"jsonbKeyIsNull": "deletedAt"}}` |
+| jsonbKeyIsNotNull | Key is not null | `{"metadata": {"jsonbKeyIsNotNull": "publishedAt"}}` |
+
+### JSON Path Operators
+| Operator | PostgreSQL | Description |
+|----------|------------|-------------|
+| jsonbPathExists | @? | Path returns items |
+| jsonbPathMatch | @@ | Path predicate matches |
+
+```javascript
+{"profile": {"jsonbPathExists": "$.user.preferences"}}
+{"metadata": {"jsonbPathMatch": "$.price > 100"}}
+```
+
+### Deep Nested Value Access
+```javascript
+// Access deeply nested value
+{"profile": {"jsonbDeepValue": {
+  "path": ["user", "preferences", "theme"],
+  "value": "dark"
+}}}
+
+// With comparison operator
+{"profile": {"jsonbDeepValue": {
+  "path": ["stats", "loginCount"],
+  "value": 10,
+  "op": "gte"  // eq, ne, gt, gte, lt, lte, like, ilike
+}}}
+```
+
+### JSONB Array/Type Operators
+```javascript
+// Check array length
+{"tags": {"jsonbArrayLength": {"op": "gte", "value": 3}}}
+
+// Check type
+{"metadata": {"jsonbTypeOf": {"type": "object"}}}
+// Types: object, array, string, number, boolean, null
+```
+
+## Geospatial Operators (PostGIS)
+
+| Operator | PostGIS | Description |
+|----------|---------|-------------|
+| within | ST_Within | Geometry within another |
+| containsGEO | ST_Contains | Geometry contains another |
+| intersects | ST_Intersects | Geometries intersect |
+| nIntersects | NOT ST_Intersects | Don't intersect |
+| dwithin | ST_DWithin | Within distance |
+
+```javascript
+// Point within polygon
+{"location": {"within": {
+  "type": "Polygon",
+  "coordinates": [[[lng1,lat1], [lng2,lat2], [lng3,lat3], [lng1,lat1]]]
+}}}
+
+// Within radius (distance in meters)
+{"location": {"dwithin": {
+  "geometry": {"type": "Point", "coordinates": [-74.006, 40.7128]},
+  "distance": 5000
+}}}
+
+// Sort by distance
+{"sort": {"_distance": {
+  "target": [-74.006, 40.7128],
+  "column": "location",
+  "direction": "ASC"
+}}}
+```
+
+## Logical Operators
+
+```javascript
+// AND (explicit)
+{"AND": [
+  {"status": {"eq": "published"}},
+  {"views": {"gt": 100}}
+]}
+
+// OR
+{"OR": [
+  {"status": {"eq": "featured"}},
+  {"views": {"gt": 1000}}
+]}
+
+// Nested
+{"AND": [
+  {"OR": [
+    {"status": {"eq": "published"}},
+    {"status": {"eq": "featured"}}
+  ]},
+  {"createdAt": {"gt": "2025-01-01"}}
+]}
+
+// Implicit AND (multiple keys)
+{"status": {"eq": "active"}, "price": {"lt": 100}}
+```
+
+## Column-to-Column Comparisons
+
+Use `$COL(columnName)` to compare against another column:
+
+```javascript
+// Compare two fields
+{"actualCost": {"gt": "$COL(estimatedCost)"}}
+
+// With type casting
+{"startTime": {"gt": "$COL(endTime)", "cast": "time"}}
+
+// PostgreSQL cast in reference
+{"startTime": {"gt": "$COL(endTime::time)"}}
+
+// Relational comparison
+{"salary": {"gt": "$COL(manager.salary)"}}
+```
+
+## Type Casting
+
+Add `"cast": "type"` to any filter condition:
+
+| Cast Type | Description |
+|-----------|-------------|
+| text, varchar | Convert to string |
+| integer, bigint | Convert to integer |
+| decimal, numeric | Convert to decimal |
+| boolean | Convert to boolean |
+| date | Extract date from datetime |
+| time | Extract time from datetime |
+| timestamp | Convert to timestamp |
+| uuid | Convert to UUID |
+| json, jsonb | Convert to JSON |
+
+```javascript
+// Date extraction
+{"createdAt": {"eq": "2025-01-15", "cast": "date"}}
+
+// Time extraction
+{"workStart": {"between": ["08:00:00", "18:00:00"], "cast": "time"}}
+
+// Number to text for pattern matching
+{"price": {"startsWith": "199", "cast": "text"}}
+```
+
+## Dynamic Variables
+
+| Variable | Description |
+|----------|-------------|
+| $CURRENT_USER | Current user's ID |
+| $CURRENT_USER.field | User's field (e.g., $CURRENT_USER.department) |
+| $CURRENT_ROLE | Current role's ID |
+| $CURRENT_ROLE.field | Role's field |
+| $CURRENT_TENANT | Current tenant ID |
+| $NOW | Current timestamp |
+
+```javascript
+{"authorId": {"eq": "$CURRENT_USER"}}
+{"tenant_Id": {"eq": "$CURRENT_TENANT"}}
+{"publishedAt": {"lte": "$NOW"}}
+```
+
+## Relative Date Variables
+
+Pattern: `$NOW[+|-][UNIT]_[NUMBER]`
+
+| Unit | Example |
+|------|---------|
+| SECONDS | $NOW-SECONDS_30 |
+| MINUTES | $NOW+MINUTES_15 |
+| HOURS | $NOW-HOURS_2 |
+| DAYS | $NOW+DAYS_7 |
+| WEEKS | $NOW-WEEKS_3 |
+| MONTHS | $NOW+MONTHS_6 |
+| YEARS | $NOW-YEARS_1 |
+
+```javascript
+// Last 30 days
+{"createdAt": {"gte": "$NOW-DAYS_30"}}
+
+// Next week
+{"scheduledAt": {"between": ["$NOW", "$NOW+DAYS_7"]}}
+
+// Last 2 hours
+{"lastModified": {"gte": "$NOW-HOURS_2"}}
+```
+
+## Relational Field Filtering
+
+```javascript
+// BelongsTo
+{"author.name": {"like": "John"}}
+
+// Deep nesting (3+ levels)
+{"comments.user.profile.verified": {"eq": true}}
+
+// Arrays in relations
+{"author.skills": {"arraycontains": ["javascript"]}}
+```
+
+## relConditions (Array Relation Filtering)
+
+Filters what items appear in O2M/M2M relation arrays:
+
+```javascript
+// Only show approved comments in posts.comments array
+{
+  "fields": ["*", "comments.*"],
+  "relConditions": {
+    "comments": {"approved": {"eq": true}}
+  }
+}
+
+// Multiple relation filters
+{
+  "relConditions": {
+    "comments": {"approved": true, "flagged": false},
+    "tags": {"active": {"eq": true}}
+  }
+}
+
+// Nested relConditions
+{
+  "relConditions": {
+    "orderItems": {
+      "quantity": {"gt": 1},
+      "product": {
+        "inStock": {"eq": true}
+      }
+    }
+  }
+}
+```
+
+---
+
+# SECTION 5: SCHEMA DEFINITION
+
+## Complete Schema Structure
+
+```javascript
+POST /schemas
+{
+  "collectionName": "products",
+  "schema": {
+    "name": "Product",
+    "timestamps": true,        // createdAt, updatedAt
+    "paranoid": false,         // deletedAt for soft deletes
+    "indexes": [],
+    "fields": {
+      "id": {
+        "type": "UUID",
+        "primaryKey": true,
+        "defaultValue": {"type": "UUIDV4"}
+      }
+      // ... more fields
+    }
+  }
+}
+```
+
+## Field Types Reference
+
+| Type | PostgreSQL | Description |
+|------|------------|-------------|
+| String | VARCHAR(255) | Short text (use values.length for custom) |
+| Text | TEXT | Unlimited text |
+| Integer | INTEGER | 32-bit integer |
+| BigInt | BIGINT | 64-bit integer |
+| Double | DOUBLE PRECISION | Floating point |
+| Decimal | DECIMAL(p,s) | Exact decimal (values: precision, scale) |
+| Boolean | BOOLEAN | true/false |
+| Date | DATE | Date only |
+| DateTime | TIMESTAMP | Date and time |
+| Time | TIME | Time only |
+| UUID | UUID | UUID v4 |
+| JSON | JSON | JSON (not queryable) |
+| JSONB | JSONB | Binary JSON (queryable, indexed) |
+| Array | type[] | PostgreSQL array |
+| Geometry | GEOMETRY | PostGIS geometry |
+| Point | POINT | PostGIS point |
+| LineString | LINESTRING | PostGIS linestring |
+| Polygon | POLYGON | PostGIS polygon |
+
+## Field Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| type | string | Field type (required) |
+| primaryKey | boolean | Is primary key |
+| allowNull | boolean | Allow NULL values |
+| unique | boolean | Unique constraint |
+| defaultValue | any | Default value or type object |
+| values | object | Type-specific options |
+| validate | object | Validation rules |
+| comment | string | Column comment |
+
+## Default Value Types
+
+```javascript
+{"type": "UUIDV4"}         // Generate UUID v4
+{"type": "NOW"}            // Current timestamp
+{"type": "AUTOINCREMENT"}  // Auto-incrementing integer
+"static value"             // Literal value
+0                          // Numeric default
+false                      // Boolean default
+[]                         // Empty array
+{}                         // Empty object
+```
+
+## Field Definition Examples
+
+```javascript
+{
+  // Primary key
+  "id": {
+    "type": "UUID",
+    "primaryKey": true,
+    "defaultValue": {"type": "UUIDV4"}
+  },
+
+  // String with length
+  "title": {
+    "type": "String",
+    "allowNull": false,
+    "values": {"length": 500}
+  },
+
+  // Text (unlimited)
+  "content": {
+    "type": "Text",
+    "allowNull": true
+  },
+
+  // Decimal with precision
+  "price": {
+    "type": "Decimal",
+    "values": {"precision": 10, "scale": 2},
+    "allowNull": false,
+    "defaultValue": 0.00
+  },
+
+  // Integer with validation
+  "age": {
+    "type": "Integer",
+    "validate": {"min": 0, "max": 150}
+  },
+
+  // Boolean with default
+  "isPublished": {
+    "type": "Boolean",
+    "allowNull": false,
+    "defaultValue": false
+  },
+
+  // DateTime
+  "publishedAt": {
+    "type": "DateTime",
+    "allowNull": true
+  },
+
+  // Array of strings
+  "tags": {
+    "type": "Array",
+    "values": {"type": "String"},
+    "defaultValue": []
+  },
+
+  // JSONB
+  "metadata": {
+    "type": "JSONB",
+    "allowNull": true,
+    "defaultValue": {}
+  },
+
+  // Geometry (PostGIS)
+  "location": {
+    "type": "Point",
+    "allowNull": true
+  }
+}
+```
+
+## Relationship Types
+
+### M2O (Many-to-One / BelongsTo)
+```javascript
+POST /schemas/posts/relationships
+{
+  "type": "M2O",
+  "target": "baasix_User",
+  "name": "author",         // Field on posts
+  "alias": "posts"          // Reverse relation name on users (optional)
+}
+// Creates: posts.author_Id → baasix_User.id
+```
+
+### O2M (One-to-Many / HasMany)
+```javascript
+// Automatically created as reverse of M2O
+// Access: user.posts
+```
+
+### M2M (Many-to-Many)
+```javascript
+POST /schemas/posts/relationships
+{
+  "type": "M2M",
+  "target": "tags",
+  "name": "tags",
+  "alias": "posts"
+}
+// Creates junction table: posts_tags_baasix
+```
+
+## Indexes
+
+```javascript
+POST /schemas/:collection/indexes
+{
+  "name": "idx_email_unique",
+  "fields": ["email"],
+  "unique": true
+}
+
+// Composite index
+{
+  "name": "idx_status_created",
+  "fields": ["status", "createdAt"]
+}
+```
+
+---
+
+# SECTION 6: SERVICES API
+
+## ItemsService
+
+```javascript
+import { ItemsService } from "@tspvivek/baasix";
+
+const service = new ItemsService("collection_name", {
+  accountability: req.accountability,  // User context
+  tenant: tenantId                      // For multi-tenant
+});
+
+// Read methods
+const result = await service.readByQuery({
+  filter: {...},
+  fields: [...],
+  sort: {...},
+  limit: 20,
+  page: 1,
+  search: "term",
+  searchFields: ["field1", "field2"],
+  relConditions: {...}
+});
+// Returns: { data: [...], totalCount: number }
+
+const item = await service.readOne(id, { fields: [...] });
+
+// Write methods
+const id = await service.createOne(data);
+const ids = await service.createMany([data1, data2]);
+const id = await service.updateOne(id, data);
+const ids = await service.updateMany([id1, id2], data);
+const count = await service.updateByQuery(filter, data);
+await service.deleteOne(id);
+await service.deleteMany([id1, id2]);
+
+// Soft delete (if paranoid enabled)
+await service.softDelete(id);
+await service.restore(id);
+
+// Options
+await service.createOne(data, { 
+  bypassPermissions: true,
+  bypassHooks: true 
+});
+```
+
+## FilesService
+
+```javascript
+import { FilesService } from "@tspvivek/baasix";
+
+const filesService = new FilesService({ accountability });
+
+// Upload file
+const fileId = await filesService.createOne(
+  { file: req.files.upload },
+  { title: "Photo", storage: "local", isPublic: true }
+);
+
+// Get file
+const file = await filesService.readOne(fileId);
+
+// Delete file
+await filesService.deleteOne(fileId);
+
+// Download from URL
+const fileId = await filesService.downloadFromUrl(url, metadata);
+```
+
+## MailService
+
+```javascript
+import { MailService } from "@tspvivek/baasix";
+
+await MailService.sendMail({
+  to: "user@example.com",
+  subject: "Welcome!",
+  templateName: "welcome",  // templates/mails/welcome.liquid
+  context: { userName: "John", link: "https://..." }
+});
+```
+
+## NotificationService
+
+```javascript
+import { NotificationService } from "@tspvivek/baasix";
+
+const notificationService = new NotificationService({ accountability });
+
+await notificationService.send({
+  type: "info",
+  title: "New Comment",
+  message: "Someone commented",
+  data: { postId: "123" },
+  userIds: ["user-1", "user-2"]
+});
+
+await notificationService.markAsSeen(userId, notificationIds);
+const count = await notificationService.getUnreadCount(userId);
+```
+
+## CacheService
+
+```javascript
+import { getCacheService, invalidateCollection, invalidateEntireCache } from "@tspvivek/baasix";
+
+const cache = getCacheService();
+
+await cache.set("key", value, ttlInSeconds);
+const value = await cache.get("key");
+await cache.delete("key");
+
+// Invalidate collection cache
+await invalidateCollection("posts");
+
+// Clear all cache
+await invalidateEntireCache();
+```
+
+## StorageService
+
+```javascript
+import { StorageService } from "@tspvivek/baasix";
+
+// Save file
+const path = await StorageService.saveFile("local", "path/file.pdf", buffer);
+
+// Get file
+const buffer = await StorageService.getFile("local", "path/file.pdf");
+
+// Get URL (signed for S3)
+const url = await StorageService.getPublicUrl("s3", "path/file.pdf");
+
+// Delete
+await StorageService.deleteFile("local", "path/file.pdf");
+```
+
+## WorkflowService
+
+```javascript
+import { WorkflowService } from "@tspvivek/baasix";
+
+const workflowService = new WorkflowService({ accountability });
+
+// Execute workflow
+const result = await workflowService.executeWorkflow(
+  workflowId,
+  triggerData
+);
+```
+
+---
+
+# SECTION 7: EXTENSIONS
+
+## Extension Types
+
+| Type | Folder Pattern | Purpose |
+|------|----------------|---------|
+| Hook | baasix-hook-{name} | Lifecycle hooks |
+| Endpoint | baasix-endpoint-{name} | Custom API routes |
+| Schedule | baasix-schedule-{name} | Cron jobs |
+| Template | baasix-templates | Email/custom templates |
+
+## Hook Extension
+
+```javascript
+// extensions/baasix-hook-posts/index.js
+export default (hooksService, context) => {
+  const { ItemsService, MailService } = context;
+
+  // Before create
+  hooksService.registerHook("posts", "items.create", async ({
+    data, accountability, collection, schema, db, transaction
+  }) => {
+    data.created_by = accountability.user.id;
+    data.slug = data.title.toLowerCase().replace(/\s+/g, '-');
+    return { data };  // Must return modified data
+  });
+
+  // After create
+  hooksService.registerHook("posts", "items.create.after", async ({
+    data, document, accountability
+  }) => {
+    await MailService.sendMail({
+      to: "admin@example.com",
+      subject: "New Post",
+      templateName: "new-post",
+      context: { post: document }
+    });
+    // No return needed for after hooks
+  });
+
+  // Before read (modify query)
+  hooksService.registerHook("posts", "items.read", async ({
+    query, accountability
+  }) => {
+    if (accountability.role.name !== "administrator") {
+      const filter = JSON.parse(query.filter || "{}");
+      query.filter = JSON.stringify({
+        AND: [filter, { published: { eq: true } }]
+      });
+    }
+    return { query };
+  });
+
+  // After read
+  hooksService.registerHook("posts", "items.read.after", async ({
+    query, result, accountability
+  }) => {
+    // Transform results
+    return { result };
+  });
+
+  // Before update
+  hooksService.registerHook("posts", "items.update", async ({
+    id, data, accountability
+  }) => {
+    data.updated_by = accountability.user.id;
+    return { data };
+  });
+
+  // Before delete
+  hooksService.registerHook("posts", "items.delete", async ({
+    id, accountability
+  }) => {
+    // Can throw to prevent deletion
+    const service = new ItemsService("posts", { accountability });
+    await service.updateOne(id, { archived: true });
+    throw new Error("Post archived instead of deleted");
+  });
+
+  // Wildcard hook (all collections)
+  hooksService.registerHook("*", "items.create.after", async (ctx) => {
+    console.log(`Created in ${ctx.collection}: ${ctx.document.id}`);
+  });
+};
+```
+
+## Hook Events Reference
+
+| Event | Phase | Can Modify |
+|-------|-------|------------|
+| items.create | Before | data |
+| items.create.after | After | - |
+| items.read | Before | query |
+| items.read.after | After | result |
+| items.update | Before | data |
+| items.update.after | After | - |
+| items.delete | Before | - (can throw) |
+| items.delete.after | After | - |
+
+## Endpoint Extension
+
+```javascript
+// extensions/baasix-endpoint-custom/index.js
+import { APIError, ItemsService } from "@tspvivek/baasix";
+
+export default {
+  id: "custom-api",
+  handler: (app, context) => {
+    
+    // Protected route
+    app.get("/api/dashboard", async (req, res, next) => {
+      try {
+        if (!req.accountability?.user) {
+          throw new APIError("Unauthorized", 401);
+        }
+
+        const { accountability } = req;
+        const ordersService = new ItemsService("orders", { accountability });
+        
+        const stats = await ordersService.readByQuery({
+          filter: { status: { eq: "completed" } },
+          aggregate: {
+            total: { function: "sum", field: "amount" },
+            count: { function: "count", field: "id" }
+          }
+        });
+
+        res.json({ data: stats.data[0] });
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    // Public route
+    app.post("/api/contact", async (req, res, next) => {
+      try {
+        const { name, email, message } = req.body;
+        
+        if (!name || !email || !message) {
+          throw new APIError("All fields required", 400);
+        }
+
+        const service = new ItemsService("contact_submissions", {});
+        const id = await service.createOne({ name, email, message });
+
+        res.status(201).json({ data: { id } });
+      } catch (error) {
+        next(error);
+      }
+    });
+  }
+};
+```
+
+## Schedule Extension
+
+```javascript
+// extensions/baasix-schedule-cleanup/index.js
+export default {
+  id: "daily-cleanup",
+  schedule: "0 2 * * *",  // 2 AM daily (cron syntax)
+  handler: async (context) => {
+    const { ItemsService } = context;
+    
+    const logsService = new ItemsService("activity_logs", {});
+    
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const oldLogs = await logsService.readByQuery({
+      filter: { createdAt: { lt: thirtyDaysAgo.toISOString() } },
+      fields: ["id"]
+    });
+    
+    if (oldLogs.data.length > 0) {
+      await logsService.deleteMany(oldLogs.data.map(l => l.id));
+    }
+  }
+};
+```
+
+---
+
+# SECTION 8: WORKFLOW SYSTEM
+
+## Trigger Types
+
+| Type | Description |
+|------|-------------|
+| manual | Execute via API |
+| webhook | Execute via webhook URL |
+| schedule | Cron-based execution |
+| hook | Trigger on data changes |
+
+## Node Types (17 total)
+
+| Node | Purpose |
+|------|---------|
+| HTTP | Make HTTP requests |
+| Transform | Transform data |
+| Condition | Conditional branching |
+| Service | Call ItemsService methods |
+| Loop | Iterate over arrays |
+| Filter | Filter array items |
+| Aggregate | Aggregate calculations |
+| Delay | Add delay |
+| Notification | Send notifications |
+| Email | Send emails |
+| Workflow | Execute sub-workflow |
+| Stats | Collect statistics |
+| File | File operations |
+| Variable | Set/get variables |
+| Script | Execute custom JavaScript |
+| Try-Catch | Error handling |
+| Trigger | Workflow entry point |
+
+## Template Variables
+
+```javascript
+{{trigger.data.fieldName}}     // Trigger data
+{{outputs.nodeId.data}}        // Node output
+{{variables.name}}             // Workflow variables
+{{accountability.user.id}}     // Current user
+```
+
+---
+
+# SECTION 9: AGGREGATION
+
+## Aggregation Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| count | Count records | `{"total": {"function": "count", "field": "id"}}` |
+| sum | Sum values | `{"revenue": {"function": "sum", "field": "amount"}}` |
+| avg | Average | `{"avgPrice": {"function": "avg", "field": "price"}}` |
+| min | Minimum | `{"minAge": {"function": "min", "field": "age"}}` |
+| max | Maximum | `{"maxScore": {"function": "max", "field": "score"}}` |
+
+## Aggregation with groupBy
+
+```javascript
+GET /items/orders
+?aggregate={"total":{"function":"sum","field":"amount"},"count":{"function":"count","field":"id"}}
+&groupBy=["status","category"]
+```
+
+---
+
+# SECTION 10: PERMISSIONS
+
+## Permission Structure
+
+```javascript
+POST /permissions
+{
+  "role_Id": "role-uuid",
+  "collection": "posts",
+  "action": "read",              // read, create, update, delete
+  "fields": ["*"],               // or specific fields
+  "conditions": {                // optional filter
+    "status": {"eq": "published"}
+  }
+}
+```
+
+## Built-in Roles
+
+| Role | Description |
+|------|-------------|
+| public | Unauthenticated users |
+| authenticated | Any logged-in user |
+| administrator | Full access |
+
+---
+
+# SECTION 11: ERROR HANDLING
+
+## Error Response Format
+
+```json
+{
+  "error": {
+    "message": "Error description",
+    "code": "ERROR_CODE"
+  }
+}
+```
+
+## HTTP Status Codes
+
+| Code | Meaning |
+|------|---------|
+| 200 | Success |
+| 201 | Created |
+| 400 | Bad request / Validation error |
+| 401 | Unauthorized (not logged in) |
+| 403 | Forbidden (no permission) |
+| 404 | Not found |
+| 409 | Conflict (duplicate) |
+| 422 | Unprocessable entity |
+| 429 | Rate limited |
+| 500 | Internal server error |
+
+## APIError Class
+
+```javascript
+import { APIError } from "@tspvivek/baasix";
+
+throw new APIError("Custom error message", 400);
+throw new APIError("Unauthorized", 401);
+throw new APIError("Not found", 404);
+```
+
+---
+
+# SECTION 12: TESTING PATTERNS
+
+```javascript
+import request from "supertest";
+
+describe("Posts API", () => {
+  let token;
+  let postId;
+
+  beforeAll(async () => {
+    const res = await request(app)
+      .post("/auth/login")
+      .send({ email: "test@test.com", password: "password" });
+    token = res.body.token;
+  });
+
+  test("Create post", async () => {
+    const res = await request(app)
+      .post("/items/posts")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "Test", content: "Content" });
+    
+    expect(res.status).toBe(201);
+    expect(res.body.data.id).toBeDefined();
+    postId = res.body.data.id;
+  });
+
+  test("Read post with relations", async () => {
+    const res = await request(app)
+      .get(`/items/posts/${postId}?fields=["*","author.*"]`)
+      .set("Authorization", `Bearer ${token}`);
+    
+    expect(res.status).toBe(200);
+    expect(res.body.data.author).toBeDefined();
+  });
+
+  test("Filter posts", async () => {
+    const filter = JSON.stringify({ status: { eq: "published" } });
+    const res = await request(app)
+      .get(`/items/posts?filter=${encodeURIComponent(filter)}`)
+      .set("Authorization", `Bearer ${token}`);
+    
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+  });
+});
+```
+
+---
+
+# SECTION 13: BEST PRACTICES
+
+1. **Always include an `id` field** with UUID or AUTOINCREMENT
+2. **Use `timestamps: true`** for automatic createdAt/updatedAt
+3. **Use JSONB over JSON** for queryable flexible data
+4. **Use relConditions** to filter array relations (O2M/M2M)
+5. **Use field selection** for performance (don't fetch `*` when not needed)
+6. **Paginate large datasets** with limit/page
+7. **Set proper indexes** for frequently filtered fields
+8. **Handle errors** in extensions with try-catch
+9. **Use req.accountability** to access current user in endpoints
+10. **Test with real data patterns** that match production
+11. **Use transactions** (hooks receive transaction context automatically)
+12. **Cache expensive computations** using CacheService
+13. **Validate input** in custom endpoints before processing
+
+---
+
+# QUICK REFERENCE CARD
+
+## Common Queries
+
+```javascript
+// List with filter and pagination
+GET /items/posts?filter={"status":"published"}&limit=10&page=1
+
+// With relations
+GET /items/posts?fields=["*","author.*"]&filter={"author.status":"active"}
+
+// Search
+GET /items/posts?search=keyword&searchFields=["title","content"]
+
+// Aggregate
+GET /items/orders?aggregate={"total":{"function":"sum","field":"amount"}}&groupBy=["status"]
+
+// Complex filter
+GET /items/posts?filter={"AND":[{"status":"published"},{"createdAt":{"gte":"$NOW-DAYS_30"}}]}
+```
+
+## Common Service Operations
+
+```javascript
+// CRUD
+const service = new ItemsService("collection", { accountability });
+const items = await service.readByQuery({ filter, fields, sort, limit, page });
+const item = await service.readOne(id, { fields });
+const id = await service.createOne(data);
+await service.updateOne(id, data);
+await service.deleteOne(id);
+```
