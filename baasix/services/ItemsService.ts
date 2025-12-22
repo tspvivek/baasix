@@ -307,29 +307,20 @@ export class ItemsService {
 
   /**
    * Get role ID from accountability
-   * Handles both string role names and role objects with id
+   * The auth middleware should always set role.id from the database
    */
-  private async getRoleId(): Promise<string | number | null> {
+  private getRoleId(): string | number | null {
     if (!this.accountability?.role) return null;
 
-    // If role is already an object with id, return it
+    // Role should be an object with id set by auth middleware
     if (typeof this.accountability.role === 'object' && this.accountability.role.id) {
       return this.accountability.role.id;
     }
 
-    // If role is a string, look up the role ID from the database
+    // Fallback for legacy string role (shouldn't happen with current middleware)
     if (typeof this.accountability.role === 'string') {
-      const roleTable = schemaManager.getTable('baasix_Role');
-      const role = await db
-        .select()
-        .from(roleTable)
-        .where(eq(roleTable.name, this.accountability.role))
-        .limit(1);
-
-      if (role.length > 0) {
-        const rolePK = schemaManager.getPrimaryKey('baasix_Role');
-        return role[0][rolePK];
-      }
+      console.warn('[ItemsService.getRoleId] Role is a string, expected object with id. This may cause permission issues.');
+      return null;
     }
 
     return null;
@@ -373,17 +364,13 @@ export class ItemsService {
       return (this.accountability.role as any).name === 'administrator';
     }
 
-    // If role is an object with id, query the database
-    const roleTable = schemaManager.getTable('baasix_Role');
-    const rolePK = schemaManager.getPrimaryKey('baasix_Role');
+    // If role is an object with id, use PermissionService (hybrid cache)
+    const roleId = (this.accountability.role as any).id;
+    if (roleId) {
+      return await permissionService.isAdministratorRoleAsync(roleId);
+    }
 
-    const role = await db
-      .select()
-      .from(roleTable)
-      .where(eq(roleTable[rolePK], (this.accountability.role as any).id))
-      .limit(1);
-
-    return role.length > 0 && role[0].name === 'administrator';
+    return false;
   }
 
   /**
@@ -484,7 +471,7 @@ export class ItemsService {
 
     // Apply permission filters
     if (!bypassPermissions && !isAdmin) {
-      const roleId = await this.getRoleId();
+      const roleId = this.getRoleId();
 
       // First, check if user has permission to perform this action
       const hasAccess = await permissionService.canAccess(
@@ -760,7 +747,7 @@ export class ItemsService {
   ): Promise<void> {
     if (isAdmin) return;
 
-    const roleId = await this.getRoleId();
+    const roleId = this.getRoleId();
 
     const allowedFields = await permissionService.getAllowedFields(
       roleId,
@@ -791,7 +778,7 @@ export class ItemsService {
    * Get default values from permissions
    */
   private async getDefaultValues(action: 'create' | 'update'): Promise<Record<string, any>> {
-    const roleId = await this.getRoleId();
+    const roleId = this.getRoleId();
     if (!roleId) return {};
 
     return await permissionService.getDefaultValues(
@@ -1380,7 +1367,7 @@ export class ItemsService {
     }
 
     // From aggregate field specifications
-    for (const [alias, aggregateInfo] of Object.entries(aggregate as Record<string, any>)) {
+    for (const [, aggregateInfo] of Object.entries(aggregate as Record<string, any>)) {
       const field = aggregateInfo.field;
       if (field && field.includes('.')) {
         relationPaths.add(field);
@@ -1391,7 +1378,23 @@ export class ItemsService {
     let combinedFilter = filter;
 
     if (!bypassPermissions && !isAdmin) {
-      const roleId = await this.getRoleId();
+      const roleId = this.getRoleId();
+
+      // First, check if user has permission to read this collection
+      const hasAccess = await permissionService.canAccess(
+        roleId,
+        this.collection,
+        'read'
+      );
+
+      if (!hasAccess) {
+        throw new APIError(
+          `You don't have permission to read items in '${this.collection}'`,
+          403
+        );
+      }
+
+      // Then apply permission filters
       const permissionFilter = await permissionService.getFilter(
         roleId,
         this.collection,
@@ -2104,7 +2107,7 @@ export class ItemsService {
     };
 
     if (!options.bypassPermissions && !isAdmin) {
-      const roleId = await this.getRoleId();
+      const roleId = this.getRoleId();
       const permissionFilter = await permissionService.getFilter(
         roleId,
         this.collection,
@@ -2479,7 +2482,7 @@ export class ItemsService {
 
     // Check permission
     if (!options.bypassPermissions && !isAdmin) {
-      const roleId = await this.getRoleId();
+      const roleId = this.getRoleId();
       const hasPermission = await permissionService.canAccess(
         roleId,
         this.collection,
@@ -2497,7 +2500,7 @@ export class ItemsService {
     };
 
     if (!options.bypassPermissions && !isAdmin) {
-      const roleId = await this.getRoleId();
+      const roleId = this.getRoleId();
       const permissionFilter = await permissionService.getFilter(
         roleId,
         this.collection,

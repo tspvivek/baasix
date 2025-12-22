@@ -10,14 +10,31 @@ import type { PermissionFilter, PermissionData } from '../types/index.js';
 export type { PermissionFilter };
 
 /**
+ * Role interface for type safety
+ */
+export interface Role {
+  id: string | number;
+  name: string;
+  description?: string;
+  isTenantSpecific?: boolean;
+  canInviteRoleIds?: string[];
+}
+
+/**
  * Permission Service - Handles role-based access control
  *
- * Matches Sequelize implementation 1:1
+ * Uses hybrid L1(Memory)+L2(Redis) caching for both roles and permissions.
  * 
- * Uses Redis/in-memory cache with infinite TTL for permissions
+ * Cache Architecture:
+ * - Roles use "auth:roles:*" keys (hybrid keys, auto-synced across instances)
+ * - Permissions use "permissions:role:*" keys (hybrid keys)
+ * - L1 reads are fast (in-memory), L2 (Redis) is source of truth
+ * - Periodic sync (default 5s) keeps all instances in sync
  */
 
 export class PermissionService {
+  private rolesLoaded: boolean = false;
+
   constructor() {
     console.info("PermissionService instance created");
   }
@@ -29,10 +46,162 @@ export class PermissionService {
     return getCache();
   }
 
+  // ==================== Role Management ====================
+  // Roles use hybrid cache keys: auth:roles:all, auth:roles:by-id:{id}, auth:roles:by-name:{name}
+  // This ensures automatic L1/L2 sync across multiple instances
+
+  /**
+   * Load all roles from database into hybrid cache
+   * Called once at startup alongside loadPermissions
+   */
+  async loadRoles(): Promise<void> {
+    try {
+      const cache = this.getCache();
+      const RoleTable = schemaManager.getTable('baasix_Role');
+      const roles = await db.select().from(RoleTable);
+
+      // Store all roles
+      const rolesById: Record<string, Role> = {};
+      const rolesByName: Record<string, Role> = {};
+
+      for (const role of roles) {
+        const roleData: Role = {
+          id: role.id,
+          name: role.name,
+          description: role.description,
+          isTenantSpecific: role.isTenantSpecific,
+          canInviteRoleIds: role.canInviteRoleIds,
+        };
+        rolesById[String(role.id)] = roleData;
+        rolesByName[role.name] = roleData;
+      }
+
+      // Store in hybrid cache (auth:* keys are auto-synced)
+      await cache.set('auth:roles:all', Object.values(rolesById), -1);
+      await cache.set('auth:roles:by-id', rolesById, -1);
+      await cache.set('auth:roles:by-name', rolesByName, -1);
+
+      this.rolesLoaded = true;
+      console.info(`[PermissionService] Loaded ${roles.length} roles into hybrid cache`);
+    } catch (error) {
+      console.error('[PermissionService] Error loading roles:', error);
+      this.rolesLoaded = true;
+    }
+  }
+
+  /**
+   * Ensure roles are loaded into cache
+   */
+  private async ensureRolesLoaded(): Promise<void> {
+    if (!this.rolesLoaded) {
+      await this.loadRoles();
+    }
+    // Also check if cache is empty (could happen if another instance cleared it)
+    const cache = this.getCache();
+    const rolesById = await cache.get('auth:roles:by-id');
+    if (!rolesById || Object.keys(rolesById).length === 0) {
+      await this.loadRoles();
+    }
+  }
+
+  /**
+   * Get role by ID (async, from hybrid cache)
+   */
+  async getRoleByIdAsync(roleId: string | number): Promise<Role | null> {
+    await this.ensureRolesLoaded();
+    const cache = this.getCache();
+    const rolesById = await cache.get('auth:roles:by-id');
+    return rolesById?.[String(roleId)] || null;
+  }
+
+  /**
+   * Get role by name (async, from hybrid cache)
+   */
+  async getRoleByNameAsync(name: string): Promise<Role | null> {
+    await this.ensureRolesLoaded();
+    const cache = this.getCache();
+    const rolesByName = await cache.get('auth:roles:by-name');
+    return rolesByName?.[name] || null;
+  }
+
+  /**
+   * Get the public role (async, from hybrid cache)
+   */
+  async getPublicRoleAsync(): Promise<Role | null> {
+    return this.getRoleByNameAsync('public');
+  }
+
+  /**
+   * Get the administrator role (async, from hybrid cache)
+   */
+  async getAdministratorRoleAsync(): Promise<Role | null> {
+    return this.getRoleByNameAsync('administrator');
+  }
+
+  /**
+   * Check if a role ID is the administrator role (async)
+   */
+  async isAdministratorRoleAsync(roleId: string | number | null | undefined): Promise<boolean> {
+    if (!roleId) return false;
+    const role = await this.getRoleByIdAsync(roleId);
+    return role?.name === 'administrator';
+  }
+
+  /**
+   * Check if a role name is administrator
+   */
+  isAdministratorRoleName(roleName: string | null | undefined): boolean {
+    return roleName === 'administrator';
+  }
+
+  /**
+   * Get all roles (async, from hybrid cache)
+   */
+  async getAllRolesAsync(): Promise<Role[]> {
+    const cache = this.getCache();
+    return (await cache.get('auth:roles:all')) || [];
+  }
+
+  /**
+   * Check if roles are loaded
+   */
+  areRolesLoaded(): boolean {
+    return this.rolesLoaded;
+  }
+
+  /**
+   * Invalidate role cache and reload
+   * Call this when roles are created, updated, or deleted
+   */
+  async invalidateRoles(): Promise<void> {
+    this.rolesLoaded = false;
+    
+    // Clear hybrid cache keys for roles
+    const cache = this.getCache();
+    await cache.delete('auth:roles:all');
+    await cache.delete('auth:roles:by-id');
+    await cache.delete('auth:roles:by-name');
+    
+    // Also invalidate legacy keys for backward compatibility
+    await cache.invalidateModel("auth:role");
+    await cache.delete("auth:public_role");
+    
+    // Reload roles into cache
+    await this.loadRoles();
+  }
+
+  // ==================== Permission Management ====================
+
   /**
    * Load permissions from database
+   * Also loads roles if not already loaded
    */
   async loadPermissions(role_Id?: string | number | null): Promise<void> {
+    // Ensure roles are loaded first
+    if (!this.rolesLoaded) {
+      await this.loadRoles();
+    }
+
     const cache = this.getCache();
     let permissions: any[];
 

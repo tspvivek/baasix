@@ -1747,6 +1747,7 @@ const registerEndpoint = (app: Express, context?: any) => {
                 }
 
                 await invalidateEntireCache();
+                await permissionService.invalidateRoles(); // Reload roles cache
                 await permissionService.loadPermissions(); // Reload permission cache (using imported singleton)
 
                 res.status(200).json({

@@ -13,6 +13,7 @@
  * e.g., $CURRENT_USER -> actual user ID
  */
 import ItemsService from "../services/ItemsService.js";
+import { permissionService } from "../services/PermissionService.js";
 
 import type { Accountability } from '../types/index.js';
 
@@ -165,13 +166,38 @@ async function resolveCollectedVariables(
   }
 
   if (variablesToResolve.CURRENT_ROLE.size > 0 && accountability.role) {
-    const roleItemsService = new ItemsService("baasix_Role", { accountability: undefined });
     const fields = Array.from(variablesToResolve.CURRENT_ROLE);
     try {
       const roleId = typeof accountability.role === 'object' ? accountability.role.id : accountability.role;
-      resolved.CURRENT_ROLE = await roleItemsService.readOne(roleId, {
-        fields: fields
-      });
+      
+      // Check if any fields are relational (contain dots) - these need DB query with relations
+      const hasRelationalFields = fields.some(field => field.includes('.'));
+      
+      if (!hasRelationalFields) {
+        // Simple fields - try PermissionService hybrid cache first
+        const cachedRole = await permissionService.getRoleByIdAsync(roleId);
+        if (cachedRole) {
+          // Filter to only requested fields
+          resolved.CURRENT_ROLE = fields.reduce((obj: any, field) => {
+            if (field in cachedRole) {
+              obj[field] = (cachedRole as any)[field];
+            }
+            return obj;
+          }, { id: cachedRole.id });
+        } else {
+          // Fallback to database query
+          const roleItemsService = new ItemsService("baasix_Role", { accountability: undefined });
+          resolved.CURRENT_ROLE = await roleItemsService.readOne(roleId, {
+            fields: fields
+          });
+        }
+      } else {
+        // Relational fields require database query with proper field expansion
+        const roleItemsService = new ItemsService("baasix_Role", { accountability: undefined });
+        resolved.CURRENT_ROLE = await roleItemsService.readOne(roleId, {
+          fields: ['id', ...fields]
+        });
+      }
     } catch (error: any) {
       console.error(`Error resolving role data: ${error.message}`);
     }

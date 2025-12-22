@@ -13,6 +13,7 @@ import { db } from "./db.js";
 import { getCache } from "./cache.js";
 import { eq, and } from "drizzle-orm";
 import { schemaManager } from "./schemaManager.js";
+import { permissionService } from '../services/PermissionService.js';
 import type { JWTPayload, UserWithRolesAndPermissions } from '../types/index.js';
 
 // Re-export types for backward compatibility
@@ -42,7 +43,7 @@ async function getSettingsService() {
 
 /**
  * Helper function to get and cache roles and permissions
- * Uses Redis cache with infinite TTL for performance
+ * Uses PermissionService for role data (cached in memory) and Redis cache for permissions
  */
 export async function getRolesAndPermissions(roleId: string | number): Promise<{
   id: string | number;
@@ -60,23 +61,15 @@ export async function getRolesAndPermissions(roleId: string | number): Promise<{
     return cachedRole;
   }
 
-  const sql = getSqlClient();
-
-  // Fetch role
-  const roles = await sql`
-    SELECT id, name, description, "isTenantSpecific"
-    FROM "baasix_Role"
-    WHERE id = ${roleId}
-    LIMIT 1
-  `;
-
-  if (roles.length === 0) {
+  // Get role from PermissionService (hybrid cache)
+  const role = await permissionService.getRoleByIdAsync(roleId);
+  
+  if (!role) {
     throw new Error(`Role with id ${roleId} not found`);
   }
 
-  const role = roles[0];
-
-  // Fetch permissions for the role
+  // Fetch permissions for the role from database
+  const sql = getSqlClient();
   const permissions = await sql`
     SELECT id, collection, action, fields, conditions
     FROM "baasix_Permission"
@@ -143,6 +136,7 @@ export async function getUserRolesPermissionsAndTenant(
   try {
     const sql = getSqlClient();
 
+    // First, get the user's role assignment
     let userRoles;
     if (tenantId) {
       userRoles = await sql`
@@ -150,13 +144,8 @@ export async function getUserRolesPermissionsAndTenant(
           ur.id as "userRoleId",
           ur."user_Id",
           ur."role_Id",
-          ur."tenant_Id",
-          r.id as "roleId",
-          r.name as "roleName",
-          r.description as "roleDescription",
-          r."isTenantSpecific" as "roleIsTenantSpecific"
+          ur."tenant_Id"
         FROM "baasix_UserRole" ur
-        LEFT JOIN "baasix_Role" r ON ur."role_Id" = r.id
         WHERE ur."user_Id" = ${userId} AND ur."tenant_Id" = ${tenantId}
         LIMIT 1
       `;
@@ -166,13 +155,8 @@ export async function getUserRolesPermissionsAndTenant(
           ur.id as "userRoleId",
           ur."user_Id",
           ur."role_Id",
-          ur."tenant_Id",
-          r.id as "roleId",
-          r.name as "roleName",
-          r.description as "roleDescription",
-          r."isTenantSpecific" as "roleIsTenantSpecific"
+          ur."tenant_Id"
         FROM "baasix_UserRole" ur
-        LEFT JOIN "baasix_Role" r ON ur."role_Id" = r.id
         WHERE ur."user_Id" = ${userId}
         LIMIT 1
       `;
@@ -184,6 +168,31 @@ export async function getUserRolesPermissionsAndTenant(
 
     const userRole = userRoles[0];
 
+    // Get role from PermissionService hybrid cache
+    let role = await permissionService.getRoleByIdAsync(userRole.role_Id);
+    
+    // Fallback to database if not in cache
+    if (!role) {
+      const roles = await sql`
+        SELECT id, name, description, "isTenantSpecific"
+        FROM "baasix_Role"
+        WHERE id = ${userRole.role_Id}
+        LIMIT 1
+      `;
+      if (roles.length > 0) {
+        role = {
+          id: roles[0].id,
+          name: roles[0].name,
+          description: roles[0].description,
+          isTenantSpecific: roles[0].isTenantSpecific,
+        };
+      }
+    }
+
+    if (!role) {
+      throw new Error(`Role with id ${userRole.role_Id} not found`);
+    }
+
     // Fetch permissions for the role
     const permissions = await sql`
       SELECT
@@ -193,7 +202,7 @@ export async function getUserRolesPermissionsAndTenant(
         fields,
         conditions
       FROM "baasix_Permission"
-      WHERE "role_Id" = ${userRole.roleId}
+      WHERE "role_Id" = ${userRole.role_Id}
     `;
 
     // Transform permissions to object format
@@ -221,10 +230,10 @@ export async function getUserRolesPermissionsAndTenant(
 
     return {
       role: {
-        id: userRole.roleId,
-        name: userRole.roleName,
-        description: userRole.roleDescription,
-        isTenantSpecific: userRole.roleIsTenantSpecific,
+        id: role.id,
+        name: role.name,
+        description: role.description,
+        isTenantSpecific: role.isTenantSpecific,
       },
       permissions: permissionsObj,
       tenant,
@@ -263,6 +272,22 @@ export function extractTokenFromHeader(authHeader: string | undefined): string |
 }
 
 /**
+ * Get the public role (from PermissionService hybrid cache)
+ * Returns the public role with its ID, or a fallback if not found
+ */
+export async function getPublicRole(): Promise<{ id: string | number | null; name: string }> {
+  // Get from PermissionService hybrid cache
+  const publicRole = await permissionService.getPublicRoleAsync();
+  
+  if (publicRole) {
+    return { id: publicRole.id, name: publicRole.name };
+  }
+
+  // Fallback if roles not loaded yet
+  return { id: null, name: 'public' };
+}
+
+/**
  * Authentication middleware for Express
  * Verifies JWT token and sets req.accountability
  */
@@ -285,9 +310,10 @@ export const authMiddleware = async (req: any, res: any, next: any) => {
 
     if (!token) {
       // No token provided - treat as public access
+      const publicRole = await getPublicRole();
       req.accountability = {
         user: null,
-        role: { id: null, name: "public" },
+        role: publicRole,
         tenant: null,
         permissions: [],
         ipaddress: req.ip || req.connection?.remoteAddress,
@@ -303,9 +329,10 @@ export const authMiddleware = async (req: any, res: any, next: any) => {
     if (!session) {
       // Session invalid/expired - fall back to public access instead of returning error
       // This allows public routes to work even with expired cookies
+      const publicRole = await getPublicRole();
       req.accountability = {
         user: null,
-        role: { id: null, name: "public" },
+        role: publicRole,
         tenant: null,
         permissions: [],
         ipaddress: req.ip || req.connection?.remoteAddress,
@@ -316,7 +343,6 @@ export const authMiddleware = async (req: any, res: any, next: any) => {
     // Get dynamically created tables from schema manager
     const userTable = schemaManager.getTable("baasix_User");
     const userRoleTable = schemaManager.getTable("baasix_UserRole");
-    const roleTable = schemaManager.getTable("baasix_Role");
     const permissionTable = schemaManager.getTable("baasix_Permission");
 
     // Get user details with role
@@ -355,9 +381,10 @@ export const authMiddleware = async (req: any, res: any, next: any) => {
     }
 
     if (!users || users.length === 0) {
+      const publicRole = await getPublicRole();
       req.accountability = {
         user: null,
-        role: { id: null, name: "public" },
+        role: publicRole,
         tenant: null,
         permissions: [],
         ipaddress: req.ip || req.connection?.remoteAddress,
@@ -381,20 +408,17 @@ export const authMiddleware = async (req: any, res: any, next: any) => {
         };
         permissions = Object.values(roleData.permissions);
       } catch {
-        const roles = await db
-          .select({
-            id: roleTable.id,
-            name: roleTable.name,
-            isTenantSpecific: roleTable.isTenantSpecific
-          })
-          .from(roleTable)
-          .where(eq(roleTable.id, user.role_Id))
-          .limit(1);
-
-        if (roles && roles.length > 0) {
-          role = roles[0];
+        // Fallback: use PermissionService hybrid cache for role
+        const cachedRole = await permissionService.getRoleByIdAsync(user.role_Id);
+        if (cachedRole) {
+          role = {
+            id: cachedRole.id,
+            name: cachedRole.name,
+            isTenantSpecific: cachedRole.isTenantSpecific,
+          };
         }
 
+        // Still need to fetch permissions from DB as fallback
         permissions = await db
           .select()
           .from(permissionTable)
@@ -424,9 +448,11 @@ export const authMiddleware = async (req: any, res: any, next: any) => {
     next();
   } catch (error: any) {
     console.error('Auth middleware error:', error.message);
+    // Fall back to public access on error
+    const publicRole = await getPublicRole();
     req.accountability = {
       user: null,
-      role: { id: null, name: "public" },
+      role: publicRole,
       tenant: null,
       permissions: [],
       ipaddress: req.ip || req.connection?.remoteAddress,

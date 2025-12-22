@@ -8,7 +8,7 @@ import type { BaasixAuth } from "./core.js";
 import type { AuthOptions } from "./types.js";
 import { createAuth } from "./core.js";
 import { getCache } from "../utils/cache.js";
-import { isAdmin } from "../utils/auth.js";
+import { isAdmin, getPublicRole } from "../utils/auth.js";
 
 // Store OAuth state in cache for validation
 const OAUTH_STATE_PREFIX = "oauth_state:";
@@ -949,9 +949,10 @@ export function createAuthMiddleware(auth: BaasixAuth) {
       
       if (!token) {
         // No token - treat as public access
+        const publicRole = await getPublicRole();
         req.accountability = {
           user: null,
-          role: { id: null, name: "public" } as any,
+          role: publicRole as any,
           permissions: [],
           tenant: null,
           ipaddress: req.ip || (req.connection as any)?.remoteAddress,
@@ -964,9 +965,10 @@ export function createAuthMiddleware(auth: BaasixAuth) {
       const result = await auth.validateSession(token);
       
       if (!result) {
+        const publicRole = await getPublicRole();
         req.accountability = {
           user: null,
-          role: { id: null, name: "public" } as any,
+          role: publicRole as any,
           permissions: [],
           tenant: null,
           ipaddress: req.ip || (req.connection as any)?.remoteAddress,
@@ -993,9 +995,11 @@ export function createAuthMiddleware(auth: BaasixAuth) {
     } catch (error) {
       console.error("Auth middleware error:", error);
       
+      // getPublicRole is now async (uses hybrid cache)
+      const publicRole = await getPublicRole();
       req.accountability = {
         user: null,
-        role: { id: null, name: "public" } as any,
+        role: publicRole as any,
         permissions: [],
         tenant: null,
         ipaddress: req.ip || (req.connection as any)?.remoteAddress,

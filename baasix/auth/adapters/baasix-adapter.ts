@@ -7,6 +7,16 @@ import type {
   AuthAdapter,
 } from "../types.js";
 
+// Lazy import for PermissionService to avoid circular dependencies
+let _permissionService: any = null;
+async function getPermissionService() {
+  if (!_permissionService) {
+    const module = await import("../../services/PermissionService.js");
+    _permissionService = module.permissionService;
+  }
+  return _permissionService;
+}
+
 /**
  * Create a Baasix adapter for the auth module
  * This adapter uses ItemsService for database operations
@@ -230,6 +240,14 @@ export function createBaasixAdapter(): AuthAdapter {
     // ==================== Role Operations ====================
 
     async findRoleByName(name) {
+      // Try PermissionService hybrid cache first
+      const permissionService = await getPermissionService();
+      const cachedRole = await permissionService.getRoleByNameAsync(name);
+      if (cachedRole) {
+        return cachedRole;
+      }
+      
+      // Fallback to database query
       const service = await getService("baasix_Role");
       const result = await service.readByQuery({
         filter: { name: { eq: name } },
@@ -239,6 +257,14 @@ export function createBaasixAdapter(): AuthAdapter {
     },
 
     async findRoleById(roleId) {
+      // Try PermissionService hybrid cache first
+      const permissionService = await getPermissionService();
+      const cachedRole = await permissionService.getRoleByIdAsync(roleId);
+      if (cachedRole) {
+        return cachedRole;
+      }
+      
+      // Fallback to database query
       const service = await getService("baasix_Role");
       try {
         return await service.readOne(roleId);

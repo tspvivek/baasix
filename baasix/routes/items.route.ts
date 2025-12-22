@@ -1,5 +1,6 @@
 import { Express } from "express";
 import ItemsService from "../services/ItemsService.js";
+import permissionService from "../services/PermissionService.js";
 import { schemaManager } from "../utils/schemaManager.js";
 import { parseQueryParams } from "../utils/router.js";
 import { APIError } from "../utils/errorHandler.js";
@@ -141,6 +142,11 @@ const registerEndpoint = (app: Express) => {
         await invalidateSettingsCache(createdItem, invalidateCorsCache);
       }
 
+      // Invalidate role cache if needed
+      if (collection === "baasix_Role") {
+        await permissionService.invalidateRoles();
+      }
+
       res.status(201).json({ data: { id: newItemId } });
     } catch (error) {
       next(error);
@@ -163,6 +169,11 @@ const registerEndpoint = (app: Express) => {
       if (collection === "baasix_Settings") {
         const updatedItem = await itemsService.readOne(updatedItemId);
         await invalidateSettingsCache(updatedItem, invalidateCorsCache);
+      }
+
+      // Invalidate role cache if needed
+      if (collection === "baasix_Role") {
+        await permissionService.invalidateRoles();
       }
 
       res.json({ data: { id: updatedItemId } });
@@ -195,6 +206,11 @@ const registerEndpoint = (app: Express) => {
       // Invalidate settings cache if needed
       if (collection === "baasix_Settings" && itemToDelete) {
         await invalidateSettingsCache(itemToDelete, invalidateCorsCache);
+      }
+
+      // Invalidate role cache if needed
+      if (collection === "baasix_Role") {
+        await permissionService.invalidateRoles();
       }
 
       res.json({ data: { id: deletedItemId } });
@@ -287,6 +303,11 @@ const registerEndpoint = (app: Express) => {
         // Invalidate settings cache if baasix_Settings was imported
         if (collection === "baasix_Settings") {
           await invalidateSettingsCacheAfterImport();
+        }
+
+        // Invalidate role cache if baasix_Role was imported
+        if (collection === "baasix_Role") {
+          await permissionService.invalidateRoles();
         }
 
         res.json({
@@ -391,6 +412,11 @@ const registerEndpoint = (app: Express) => {
         // Invalidate settings cache if baasix_Settings was imported
         if (collection === "baasix_Settings") {
           await invalidateSettingsCacheAfterImport();
+        }
+
+        // Invalidate role cache if baasix_Role was imported
+        if (collection === "baasix_Role") {
+          await permissionService.invalidateRoles();
         }
 
         res.json({

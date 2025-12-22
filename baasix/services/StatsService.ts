@@ -15,8 +15,8 @@ class StatsService {
 
     const results: Record<string, any> = {};
 
-    // Process all stats queries in parallel
-    const promises = statsQueries.map(async (statsQuery) => {
+    // Process stats queries sequentially - fail fast on permission errors
+    for (const statsQuery of statsQueries) {
       const { name, query, collection } = statsQuery;
 
       if (!name) {
@@ -31,35 +31,19 @@ class StatsService {
         throw new Error('Each stats query must have a "collection" property');
       }
 
-      try {
-        // Create a new ReportService instance for each collection
-        const reportService = new ReportService(collection, {
-          accountability: this.accountability,
-        });
-        const result = await reportService.generateReport(query);
-        return { name, result };
-      } catch (error: any) {
-        return { name, error: error.message };
-      }
-    });
-
-    const statsResults = await Promise.all(promises);
-
-    // Organize results by name
-    statsResults.forEach(({ name, result, error }) => {
-      if (error) {
-        results[name] = { error };
-      } else {
-        results[name] = result;
-      }
-    });
-
-    const successfulCount = statsResults.filter((r) => !r.error).length;
+      // Create a new ReportService instance for each collection
+      // Don't catch errors - let permission errors propagate up
+      const reportService = new ReportService(collection, {
+        accountability: this.accountability,
+      });
+      const result = await reportService.generateReport(query);
+      results[name] = result;
+    }
 
     return {
       data: results,
       totalStats: statsQueries.length,
-      successfulStats: successfulCount,
+      successfulStats: statsQueries.length,
     };
   }
 }
