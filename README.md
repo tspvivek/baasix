@@ -16,7 +16,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@tspvivek/baasix"><img src="https://img.shields.io/npm/v/@tspvivek/baasix.svg" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/@tspvivek/baasix"><img src="https://img.shields.io/npm/dm/@tspvivek/baasix.svg" alt="npm downloads"></a>
-  <a href="https://github.com/tspvivek/baasix/blob/master/LICENSE"><img src="https://img.shields.io/npm/l/@tspvivek/baasix.svg" alt="license"></a>
+  <a href="https://github.com/tspvivek/baasix/blob/master/LICENSE.MD"><img src="https://img.shields.io/npm/l/@tspvivek/baasix.svg" alt="license"></a>
 </p>
 
 ---
