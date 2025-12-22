@@ -1,6 +1,6 @@
 {
     "name": "@tspvivek/baasix",
-    "version": "0.1.0-alpha.2",
+    "version": "0.1.0-alpha.3",
     "description": "Baasix API with Drizzle ORM - Migration from Sequelize",
     "main": "dist/index.js",
     "type": "module",
@@ -28,7 +28,12 @@
         "db:migrate": "tsx drizzle/migrate.ts"
     },
     "author": "Vivek Palanisamy",
-    "license": "https://www.baasix.com/license",
+    "license": "LicenseRef-LICENSE.MD",
+    "homepage": "https://www.baasix.com",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/tspvivek/baasix.git"
+    },
     "dependencies": {
         "@aws-sdk/client-s3": "^3.645.0",
         "@aws-sdk/s3-request-presigner": "^3.645.0",
