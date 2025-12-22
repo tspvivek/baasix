@@ -34,6 +34,7 @@ import {
   processDeferredFields
 } from '../utils/relationUtils.js';
 import { resolveRelationPath } from '../utils/relationPathResolver.js';
+import fieldUtils from '../utils/fieldUtils.js';
 import type {
   ProcessedInclude,
   IncludeConfig,
@@ -1047,8 +1048,11 @@ export class ItemsService {
     const countResult = await countQuery;
     const totalCount = countResult[0]?.count || 0;
 
+    // Strip hidden fields from records before returning
+    const strippedRecords = fieldUtils.stripHiddenFieldsFromRecords(this.collection, orderedRecords);
+
     return {
-      data: orderedRecords,
+      data: strippedRecords,
       totalCount
     };
   }
@@ -1333,12 +1337,15 @@ export class ItemsService {
         }
       );
 
+      // Strip hidden fields from records
+      const strippedRecords = fieldUtils.stripHiddenFieldsFromRecords(this.collection, finalRecords);
+
       // Execute after-read hooks
       hookData = await hooksManager.executeHooks(
         this.collection,
         'items.read.after',
         this.accountability,
-        { query: modifiedQuery, result: { data: finalRecords, totalCount } }
+        { query: modifiedQuery, result: { data: strippedRecords, totalCount } }
       );
 
       return hookData.result;
@@ -1670,12 +1677,15 @@ export class ItemsService {
 
       const document = finalRecords[0];
 
+      // Strip hidden fields from the document
+      const strippedDocument = fieldUtils.stripHiddenFields(this.collection, document);
+
       // Execute after-read-one hooks
       hookData = await hooksManager.executeHooks(
         this.collection,
         'items.read.one.after',
         this.accountability,
-        { id: parsedId, query, document }
+        { id: parsedId, query, document: strippedDocument }
       );
 
       return hookData.document;

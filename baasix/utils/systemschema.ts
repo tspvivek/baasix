@@ -98,6 +98,7 @@ export const systemSchemas = {
                         as: "role",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["name"],
                     },
                 },
                 indexes: [
@@ -133,6 +134,7 @@ export const systemSchemas = {
                         SystemGenerated: "true",
                         description: "M2O",
                         onDelete: "CASCADE",
+                        showAs: ["fullName", " (", "email", ")", " "],
                     },
                     role: {
                         relType: "BelongsTo",
@@ -141,6 +143,7 @@ export const systemSchemas = {
                         as: "role",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["name"],
                     },
                     tenant: {
                         relType: "BelongsTo",
@@ -149,6 +152,7 @@ export const systemSchemas = {
                         as: "tenant",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["name"],
                     },
                 },
             },
@@ -208,7 +212,7 @@ export const systemSchemas = {
                     email: { type: "String", allowNull: true, SystemGenerated: "true" },
                     emailVerified: { type: "Boolean", allowNull: false, defaultValue: false, SystemGenerated: "true" },
                     avatar_Id: { type: "UUID", SystemGenerated: "true" },
-                    password: { type: "String", allowNull: true, SystemGenerated: "true" },
+                    password: { type: "String", allowNull: true, SystemGenerated: "true", hidden: true },
                     lastAccess: { type: "DateTime", allowNull: true, SystemGenerated: "true" },
                     userRoles: {
                         relType: "HasMany",
@@ -226,6 +230,7 @@ export const systemSchemas = {
                         as: "avatar",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["title", " - ", "originalFilename"],
                     },
                     status: {
                         type: "ENUM",
@@ -266,6 +271,7 @@ export const systemSchemas = {
                         type: "String",
                         allowNull: false,
                         SystemGenerated: "true",
+                        hidden: true,
                     },
                     user_Id: {
                         type: "UUID",
@@ -304,6 +310,7 @@ export const systemSchemas = {
                         SystemGenerated: "true",
                         description: "M2O",
                         onDelete: "CASCADE",
+                        showAs: ["fullName", " (", "email", ")"],
                     },
                     tenant: {
                         relType: "BelongsTo",
@@ -312,6 +319,7 @@ export const systemSchemas = {
                         as: "tenant",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["name"],
                     },
                 },
                 indexes: [
@@ -358,12 +366,14 @@ export const systemSchemas = {
                         allowNull: true,
                         SystemGenerated: "true",
                         description: "OAuth access token",
+                        hidden: true,
                     },
                     refreshToken: {
                         type: "Text",
                         allowNull: true,
                         SystemGenerated: "true",
                         description: "OAuth refresh token",
+                        hidden: true,
                     },
                     accessTokenExpiresAt: {
                         type: "DateTime",
@@ -386,12 +396,14 @@ export const systemSchemas = {
                         allowNull: true,
                         SystemGenerated: "true",
                         description: "OAuth ID token",
+                        hidden: true,
                     },
                     password: {
                         type: "String",
                         allowNull: true,
                         SystemGenerated: "true",
                         description: "Hashed password for credential accounts",
+                        hidden: true,
                     },
                     user: {
                         relType: "BelongsTo",
@@ -401,6 +413,7 @@ export const systemSchemas = {
                         SystemGenerated: "true",
                         description: "M2O",
                         onDelete: "CASCADE",
+                        showAs: ["fullName", " (", "email", ")"],
                     },
                 },
                 indexes: [
@@ -435,6 +448,7 @@ export const systemSchemas = {
                         allowNull: false,
                         SystemGenerated: "true",
                         description: "Verification token or code",
+                        hidden: true,
                     },
                     expiresAt: {
                         type: "DateTime",
@@ -482,6 +496,7 @@ export const systemSchemas = {
                         as: "userCreated",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["fullName"],
                     },
                     userUpdated_Id: { type: "UUID", SystemGenerated: "true" },
                     userUpdated: {
@@ -491,6 +506,7 @@ export const systemSchemas = {
                         as: "userUpdated",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["fullName"],
                     },
                     tenant_Id: { type: "UUID", allowNull: true, SystemGenerated: "true" },
                     tenant: {
@@ -500,6 +516,7 @@ export const systemSchemas = {
                         as: "tenant",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["name"],
                     },
                     isPublic: {
                         type: "Boolean",
@@ -529,6 +546,7 @@ export const systemSchemas = {
                         as: "userCreated",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["fullName"],
                     },
                     userUpdated_Id: { type: "UUID", SystemGenerated: "true" },
                     userUpdated: {
@@ -538,6 +556,7 @@ export const systemSchemas = {
                         as: "userUpdated",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["fullName"],
                     },
                     status: {
                         type: "ENUM",
@@ -561,6 +580,7 @@ export const systemSchemas = {
                         description: "M2O",
                         onDelete: "SET NULL",
                         onUpdate: "SET NULL",
+                        showAs: ["originalFilename"],
                     },
                     scheduled_time: {
                         type: "DateTime",
@@ -585,6 +605,7 @@ export const systemSchemas = {
                         as: "tenant",
                         SystemGenerated: "true",
                         description: "M2O relationship to tenant",
+                        showAs: ["name"],
                     },
                 },
                 timestamps: true,
@@ -642,6 +663,7 @@ export const systemSchemas = {
                         as: "user",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["fullName", " (", "email", ")"],
                     },
                     tenant: {
                         relType: "BelongsTo",
@@ -650,6 +672,7 @@ export const systemSchemas = {
                         as: "tenant",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["name"],
                     },
                 },
             },
@@ -679,6 +702,7 @@ export const systemSchemas = {
                         as: "user",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["fullName", " (", "email", ")"],
                     },
                     tenant_Id: { type: "UUID", allowNull: true, SystemGenerated: "true" },
                     tenant: {
@@ -688,6 +712,7 @@ export const systemSchemas = {
                         as: "tenant",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["name"],
                     },
                 },
             },
@@ -928,6 +953,7 @@ export const systemSchemas = {
                         SystemGenerated: "true",
                         onDelete: "CASCADE",
                         description: "M2O",
+                        showAs: ["name"],
                     },
                     project_logo_light: {
                         relType: "BelongsTo",
@@ -936,6 +962,7 @@ export const systemSchemas = {
                         as: "project_logo_light",
                         SystemGenerated: "true",
                         onDelete: "RESTRICT",
+                        showAs: ["originalFilename"],
                     },
                     project_logo_dark: {
                         relType: "BelongsTo",
@@ -944,6 +971,7 @@ export const systemSchemas = {
                         as: "project_logo_dark",
                         SystemGenerated: "true",
                         onDelete: "RESTRICT",
+                        showAs: ["originalFilename"],
                     },
                     project_logo_full: {
                         relType: "BelongsTo",
@@ -952,6 +980,7 @@ export const systemSchemas = {
                         as: "project_logo_full",
                         SystemGenerated: "true",
                         onDelete: "RESTRICT",
+                        showAs: ["originalFilename"],
                     },
                     project_logo_transparent: {
                         relType: "BelongsTo",
@@ -960,6 +989,7 @@ export const systemSchemas = {
                         as: "project_logo_transparent",
                         SystemGenerated: "true",
                         onDelete: "RESTRICT",
+                        showAs: ["originalFilename"],
                     },
                     project_favicon: {
                         relType: "BelongsTo",
@@ -968,6 +998,7 @@ export const systemSchemas = {
                         as: "project_favicon",
                         SystemGenerated: "true",
                         onDelete: "RESTRICT",
+                        showAs: ["originalFilename"],
                     },
                     project_icon: {
                         relType: "BelongsTo",
@@ -976,6 +1007,7 @@ export const systemSchemas = {
                         as: "project_icon",
                         SystemGenerated: "true",
                         onDelete: "RESTRICT",
+                        showAs: ["originalFilename"],
                     },
                     email_icon: {
                         relType: "BelongsTo",
@@ -984,6 +1016,7 @@ export const systemSchemas = {
                         as: "email_icon",
                         SystemGenerated: "true",
                         onDelete: "RESTRICT",
+                        showAs: ["originalFilename"],
                     },
                 },
                 indexes: [
@@ -1071,6 +1104,7 @@ export const systemSchemas = {
                         as: "inviter",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["fullName", " (", "email", ")"],
                     },
                     user: {
                         relType: "BelongsTo",
@@ -1079,6 +1113,7 @@ export const systemSchemas = {
                         as: "user",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["fullName", " (", "email", ")"],
                     },
                     role: {
                         relType: "BelongsTo",
@@ -1087,6 +1122,7 @@ export const systemSchemas = {
                         as: "role",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["name"],
                     },
                     tenant: {
                         relType: "BelongsTo",
@@ -1095,6 +1131,7 @@ export const systemSchemas = {
                         as: "tenant",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["name"],
                     },
                 },
                 indexes: [
@@ -1135,6 +1172,7 @@ export const systemSchemas = {
                         as: "user",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["fullName", " (", "email", ")"],
                     },
                     collectionName: {
                         type: "String",
@@ -1289,6 +1327,7 @@ export const systemSchemas = {
                         as: "userCreated",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["fullName"],
                     },
                     userUpdated_Id: { type: "UUID", SystemGenerated: "true" },
                     userUpdated: {
@@ -1298,6 +1337,7 @@ export const systemSchemas = {
                         as: "userUpdated",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["fullName"],
                     },
                     executions: {
                         relType: "HasMany",
@@ -1348,6 +1388,7 @@ export const systemSchemas = {
                         SystemGenerated: "true",
                         description: "M2O",
                         onDelete: "CASCADE",
+                        showAs: ["name"],
                     },
                     status: {
                         type: "ENUM",
@@ -1406,6 +1447,7 @@ export const systemSchemas = {
                         as: "tenant",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["name"],
                     },
                     triggered_by_Id: {
                         type: "UUID",
@@ -1419,6 +1461,7 @@ export const systemSchemas = {
                         as: "triggered_by",
                         SystemGenerated: "true",
                         description: "M2O",
+                        showAs: ["fullName", " (", "email", ")"],
                     },
                     logs: {
                         relType: "HasMany",

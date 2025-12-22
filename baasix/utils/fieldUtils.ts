@@ -445,6 +445,73 @@ const fieldUtils = {
   buildFieldPath(parts: string[]): string {
     return parts.join('.');
   },
+
+  /**
+   * Get list of hidden fields in a collection
+   * Hidden fields should never be returned in API responses
+   * @param collectionName - Name of the collection
+   * @returns Array of hidden field names
+   */
+  getHiddenFields(collectionName: string): string[] {
+    const schema = schemaManager.getSchema(collectionName);
+    if (!schema || !schema.columns) {
+      return [];
+    }
+
+    const hiddenFields: string[] = [];
+    for (const [fieldName, fieldDef] of Object.entries(schema.columns)) {
+      if ((fieldDef as any).hidden === true) {
+        hiddenFields.push(fieldName);
+      }
+    }
+    return hiddenFields;
+  },
+
+  /**
+   * Strip hidden fields from a record
+   * @param collectionName - Name of the collection
+   * @param record - Record to strip hidden fields from
+   * @returns Record without hidden fields
+   */
+  stripHiddenFields<T extends Record<string, any>>(
+    collectionName: string,
+    record: T
+  ): T {
+    const hiddenFields = fieldUtils.getHiddenFields(collectionName);
+    if (hiddenFields.length === 0) {
+      return record;
+    }
+
+    const result = { ...record };
+    for (const field of hiddenFields) {
+      delete result[field];
+    }
+    return result;
+  },
+
+  /**
+   * Strip hidden fields from an array of records
+   * @param collectionName - Name of the collection
+   * @param records - Array of records to strip hidden fields from
+   * @returns Array of records without hidden fields
+   */
+  stripHiddenFieldsFromRecords<T extends Record<string, any>>(
+    collectionName: string,
+    records: T[]
+  ): T[] {
+    const hiddenFields = fieldUtils.getHiddenFields(collectionName);
+    if (hiddenFields.length === 0) {
+      return records;
+    }
+
+    return records.map(record => {
+      const result = { ...record };
+      for (const field of hiddenFields) {
+        delete result[field];
+      }
+      return result;
+    });
+  },
 };
 
 export default fieldUtils;
