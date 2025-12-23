@@ -135,6 +135,62 @@ Includes:
 - PM2 ecosystem configurations
 - Kubernetes manifests
 - Example extensions (hooks & endpoints)
+- MCP configuration files for AI-powered development
+
+---
+
+## 🤖 MCP Server (AI Integration)
+
+Baasix includes a Model Context Protocol (MCP) server that enables AI assistants like Claude, GitHub Copilot, and Cursor to interact directly with your Baasix backend.
+
+👉 **[Baasix MCP Server](https://github.com/tspvivek/baasix-mcp-server)** | **[npm: @tspvivek/baasix-mcp-server](https://www.npmjs.com/package/@tspvivek/baasix-mcp-server)**
+
+### Features
+- **40+ MCP Tools** for comprehensive Baasix operations
+- **Schema Management** — Create, update, delete collections and relationships
+- **CRUD Operations** — Full item management with powerful query capabilities
+- **50+ Filter Operators** — From basic comparison to geospatial and JSONB queries
+- **Permissions** — Role-based access control management
+- **Authentication** — Login, register, magic links, invitations
+
+### Quick Setup
+
+**For Claude Code / Anthropic CLI** — Create `.mcp.json` in your project:
+```json
+{
+  "mcpServers": {
+    "baasix": {
+      "command": "npx",
+      "args": ["@tspvivek/baasix-mcp-server"],
+      "env": {
+        "BAASIX_URL": "http://localhost:8056",
+        "BAASIX_EMAIL": "admin@baasix.com",
+        "BAASIX_PASSWORD": "admin@123"
+      }
+    }
+  }
+}
+```
+
+**For VS Code with GitHub Copilot** — Create `.vscode/mcp.json`:
+```jsonc
+{
+  "servers": {
+    "baasix": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["@tspvivek/baasix-mcp-server"],
+      "env": {
+        "BAASIX_URL": "http://localhost:8056",
+        "BAASIX_EMAIL": "admin@baasix.com",
+        "BAASIX_PASSWORD": "admin@123"
+      }
+    }
+  }
+}
+```
+
+For more configuration options and examples, see the [MCP Server documentation](https://github.com/tspvivek/baasix-mcp-server).
 
 ---
 
