@@ -4,6 +4,7 @@ import AssetsService from "../services/AssetsService.js";
 import SettingsService from "../services/SettingsService.js";
 import fileUpload from "express-fileupload";
 import { APIError } from "../utils/errorHandler.js";
+import { parseQueryParams } from "../utils/router.js";
 import env from "../utils/env.js";
 import fs from "fs";
 import axios from "axios";
@@ -20,7 +21,8 @@ const registerEndpoint = (app: Express) => {
   // Get all files
   app.get("/files", initFileService, async (req: any, res, next) => {
     try {
-      const result = await req.filesService.itemService.readByQuery(req.query);
+      const query = parseQueryParams(req.query);
+      const result = await req.filesService.itemService.readByQuery(query);
       res.status(200).json(result);
     } catch (error) {
       console.error(error);
