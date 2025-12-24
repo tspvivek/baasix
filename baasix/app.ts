@@ -1,5 +1,5 @@
 import env from "./utils/env.js";
-import "./utils/logger.js";
+import { initializeLogger, getLogger, BaasixLoggerOptions } from "./utils/logger.js";
 
 import express from "express";
 import bodyParser from "body-parser";
@@ -283,15 +283,34 @@ process.once("SIGUSR2", async () => {
 });
 
 /**
- * Start the Baasix server
- * @param port - Port number to listen on (default from env or 8055)
+ * Server startup options
  */
-export async function startServer(port?: number) {
-  const serverPort = port || parseInt(env.get("PORT") || "8055");
+export interface StartServerOptions {
+  /** Port number to listen on (default from env or 8055) */
+  port?: number;
+  /** Pino logger configuration options */
+  logger?: BaasixLoggerOptions;
+}
+
+/**
+ * Start the Baasix server
+ * @param options - Server startup options including port and logger configuration
+ */
+export async function startServer(options?: StartServerOptions | number) {
+  // Support legacy call signature: startServer(port)
+  const opts: StartServerOptions = typeof options === "number" 
+    ? { port: options } 
+    : options || {};
+  
+  const serverPort = opts.port || parseInt(env.get("PORT") || "8055");
+
+  // Initialize logger first with user-provided options
+  initializeLogger(opts.logger);
+  const logger = getLogger();
 
   try {
     // Initialize database with cache service FIRST
-    console.info("Initializing database with cache service...");
+    logger.info("Initializing database with cache service...");
     await initializeDatabaseWithCache();
 
     server = createServer(app);
@@ -310,22 +329,28 @@ export async function startServer(port?: number) {
     }
 
     server.listen(serverPort, () => {
-      console.info(`🚀 Baasix Server running on port ${serverPort}`);
+      logger.info(`🚀 Baasix Server running on port ${serverPort}`);
     });
 
     return app;
   } catch (error) {
-    console.error("Failed to start server:", error);
+    logger.error(error, "Failed to start server");
     process.exit(1);
   }
 }
 
 /**
  * Start server for testing with environment overrides
- * @param options - Testing options including environment overrides
+ * @param options - Testing options including environment overrides and logger configuration
  */
-export async function startServerForTesting(options?: { envOverrides?: Record<string, string> }) {
-  const { envOverrides } = options || {};
+export async function startServerForTesting(options?: { 
+  envOverrides?: Record<string, string>;
+  logger?: BaasixLoggerOptions;
+}) {
+  const { envOverrides, logger: loggerOptions } = options || {};
+
+  // Initialize logger for testing (default to silent or minimal logging in tests)
+  initializeLogger(loggerOptions || { level: "warn" });
 
   try {
     // If there's an existing server instance, close it first

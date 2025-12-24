@@ -29,6 +29,7 @@
 - **⚡ Workflow Automation** — Visual workflow builder with 17 node types and real-time monitoring
 - **🔔 Notification System** — Built-in user notifications with real-time delivery via Socket.IO
 - **📁 File Storage & Processing** — Upload, manage, and transform files with image optimization
+- **📝 Pino Logger** — High-performance structured logging with configurable transports (Datadog, Loki, etc.)
 - **🌍 PostGIS Geospatial Support** — Advanced spatial data operations
 - **📊 Reporting & Analytics** — Generate complex reports with grouping and aggregation
 - **🪝 Hooks System** — Extend functionality with custom hooks on CRUD operations
@@ -59,9 +60,19 @@ npm install @tspvivek/baasix
 ```javascript
 import { startServer } from "@tspvivek/baasix";
 
+// Basic usage - pretty printing in dev, JSON in production
 startServer().catch((error) => {
   console.error("Failed to start server:", error);
   process.exit(1);
+});
+
+// With custom logger configuration
+startServer({
+  port: 8056,
+  logger: {
+    level: "info",      // 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace'
+    pretty: true,       // Human-readable output (default in development)
+  }
 });
 ```
 
@@ -251,6 +262,9 @@ import {
   getDatabase,
   getSqlClient 
 } from "@tspvivek/baasix";
+
+// Logger
+import { getLogger, initializeLogger } from "@tspvivek/baasix";
 ```
 
 ---

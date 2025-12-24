@@ -6,7 +6,6 @@
  */
 
 import { schemaManager } from './schemaManager.js';
-import { originalConsole as logger } from './logger.js';
 import type { FieldInfo, FlattenedField } from '../types/index.js';
 
 // Re-export types for backward compatibility
@@ -49,7 +48,7 @@ const fieldUtils = {
     const schema = schemaManager.getSchema(collectionName);
     
     if (!schema) {
-      logger.warn(`Schema not found for collection: ${collectionName}`);
+      console.warn(`Schema not found for collection: ${collectionName}`);
       return fields;
     }
 

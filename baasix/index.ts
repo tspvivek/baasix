@@ -7,6 +7,11 @@
 
 // Export server application and utilities
 export { app, startServer, invalidateCorsCache, startServerForTesting, destroyAllTablesInDB } from './app.js';
+export type { StartServerOptions } from './app.js';
+
+// Export logger utilities
+export { initializeLogger, getLogger, getOriginalConsole } from './utils/logger.js';
+export type { BaasixLoggerOptions, Logger, LoggerOptions, DestinationStream } from './utils/logger.js';
 
 // Export all utilities
 export * from './utils/index.js';
