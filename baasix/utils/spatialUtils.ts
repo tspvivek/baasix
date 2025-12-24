@@ -72,7 +72,9 @@ const spatialUtils = {
     const g2 = typeof geom2 === 'string' ? sql.raw(geom2) : geom2;
     
     if (useGeography) {
-      return sql`ST_Distance(${g1}::geography, ${g2}::geography)`;
+      // Use ST_DistanceSpheroid for accurate earth-surface distance in meters
+      // This is more reliable than ::geography casting across different PostGIS versions
+      return sql`ST_DistanceSpheroid(${g1}, ${g2}, 'SPHEROID["WGS 84",6378137,298.257223563]')`;
     }
     return sql`ST_Distance(${g1}, ${g2})`;
   },
@@ -96,7 +98,10 @@ const spatialUtils = {
     const g2 = typeof geom2 === 'string' ? sql.raw(geom2) : geom2;
     
     if (useGeography) {
-      return sql`ST_DWithin(${g1}::geography, ${g2}::geography, ${distance})`;
+      // Use ST_DistanceSpheroid for accurate earth-surface distance in meters
+      // This is more reliable than ::geography casting across different PostGIS versions
+      const spheroid = sql.raw(`'SPHEROID["WGS 84",6378137,298.257223563]'`);
+      return sql`ST_DistanceSpheroid(${g1}, ${g2}, ${spheroid}) <= ${distance}`;
     }
     return sql`ST_DWithin(${g1}, ${g2}, ${distance})`;
   },

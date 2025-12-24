@@ -519,10 +519,12 @@ export function calculateDistance(
   targetPoint: { type: string; coordinates: [number, number] }
 ): SQL<number> {
   const geoJSON = JSON.stringify(targetPoint);
-  // Use sql<number> for type safety - returns distance in meters
-  return sql<number>`ST_Distance(
-    ${column}::geography,
-    ST_SetSRID(ST_GeomFromGeoJSON(${geoJSON}), 4326)::geography
+  // Use ST_DistanceSpheroid for accurate earth-surface distance in meters
+  // This is more reliable than ::geography casting across different PostGIS versions
+  return sql<number>`ST_DistanceSpheroid(
+    ${column},
+    ST_SetSRID(ST_GeomFromGeoJSON(${geoJSON}), 4326),
+    'SPHEROID["WGS 84",6378137,298.257223563]'
   )`.mapWith(Number);
 }
 

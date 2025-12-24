@@ -850,6 +850,32 @@ export class SchemaManager {
       case 'Double':
         pgType = 'NUMERIC';
         break;
+      
+      // PostGIS Geometry types
+      case 'Point':
+        pgType = `geometry(Point, ${fieldSchema.values?.srid || 4326})`;
+        break;
+      case 'LineString':
+        pgType = `geometry(LineString, ${fieldSchema.values?.srid || 4326})`;
+        break;
+      case 'Polygon':
+        pgType = `geometry(Polygon, ${fieldSchema.values?.srid || 4326})`;
+        break;
+      case 'MultiPoint':
+        pgType = `geometry(MultiPoint, ${fieldSchema.values?.srid || 4326})`;
+        break;
+      case 'MultiLineString':
+        pgType = `geometry(MultiLineString, ${fieldSchema.values?.srid || 4326})`;
+        break;
+      case 'MultiPolygon':
+        pgType = `geometry(MultiPolygon, ${fieldSchema.values?.srid || 4326})`;
+        break;
+      case 'GeometryCollection':
+        pgType = `geometry(GeometryCollection, ${fieldSchema.values?.srid || 4326})`;
+        break;
+      case 'Geography':
+        pgType = `geography(Point, ${fieldSchema.values?.srid || 4326})`;
+        break;
     }
     
     parts.push(pgType);

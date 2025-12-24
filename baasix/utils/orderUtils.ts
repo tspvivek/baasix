@@ -195,8 +195,10 @@ export function sortByDistance(
   direction: SortDirection = 'ASC'
 ): SQL {
   const geoJSON = JSON.stringify(referencePoint);
-  // Use sql template with embedded field reference
-  const distanceSQL = sql`ST_Distance(${sql.raw(fieldName)}::geography, ST_SetSRID(ST_GeomFromGeoJSON(${geoJSON}), 4326)::geography)`;
+  // Use ST_DistanceSpheroid for accurate earth-surface distance calculations in meters
+  // This is more reliable than ::geography casting across different PostGIS versions
+  const spheroid = `SPHEROID["WGS 84",6378137,298.257223563]`;
+  const distanceSQL = sql`ST_DistanceSpheroid(${sql.raw(fieldName)}, ST_SetSRID(ST_GeomFromGeoJSON(${geoJSON}), 4326), ${spheroid})`;
 
   const normalizedDirection = direction.toUpperCase() as 'ASC' | 'DESC';
   return normalizedDirection === 'ASC' ? asc(distanceSQL) : desc(distanceSQL);

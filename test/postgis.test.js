@@ -159,7 +159,10 @@ describe("PostGIS Spatial Queries", () => {
         expect(response.body.data[0].name).toBe("Central Park");
     });
 
-    test("Distance Greater Than", async () => {
+    test("Distance Within Query", async () => {
+        // Query for locations within 5km (5000m) of NYC center (Lower Manhattan)
+        // Statue of Liberty is ~4.2km from NYC center
+        // Central Park is ~8.5km from NYC center
         const response = await request(app)
             .get("/items/locations")
             .set("Authorization", `Bearer ${adminToken}`)
@@ -169,13 +172,15 @@ describe("PostGIS Spatial Queries", () => {
                         dwithin: {
                             geometry: {
                                 type: "Point",
-                                coordinates: [-74.006, 40.7128], // New York City center
+                                coordinates: [-74.006, 40.7128], // New York City center (Lower Manhattan)
                             },
-                            distance: 8000, // 8 km in meters
+                            distance: 5000, // 5 km in meters - only Statue of Liberty should be within
                         },
                     },
                 }),
             });
+
+        console.log("Distance Within Query response:", JSON.stringify(response.body.data, null, 2));
 
         expect(response.status).toBe(200);
         expect(response.body.data.length).toBe(1);
@@ -204,7 +209,7 @@ describe("PostGIS Spatial Queries", () => {
         expect(response.body.data[1].name).toBe("Statue of Liberty");
     });
 
-    test("Sort by Distance (Reverse)", async () => {
+    test("Sort by Distance (Farthest First)", async () => {
         const response = await request(app)
             .get("/items/locations")
             .set("Authorization", `Bearer ${adminToken}`)
@@ -213,17 +218,18 @@ describe("PostGIS Spatial Queries", () => {
                     _distance: {
                         target: [-74.006, 40.7128], // New York City center
                         column: "point",
-                        direction: "ASC", // Sort from farthest to nearest
+                        direction: "DESC", // DESC = farthest first (descending distance)
                     },
                 }),
             });
 
-        console.log("Sort by Distance (Reverse) response:", JSON.stringify(response.body, null, 2));
+        console.log("Sort by Distance (Farthest First) response:", JSON.stringify(response.body, null, 2));
 
         expect(response.status).toBe(200);
         expect(response.body.data.length).toBe(2);
-        expect(response.body.data[0].name).toBe("Statue of Liberty");
-        expect(response.body.data[1].name).toBe("Central Park");
+        // Central Park is farther from NYC center than Statue of Liberty
+        expect(response.body.data[0].name).toBe("Central Park");
+        expect(response.body.data[1].name).toBe("Statue of Liberty");
     });
 
     test("Intersects Query", async () => {
@@ -255,6 +261,8 @@ describe("PostGIS Spatial Queries", () => {
     });
 
     test("Buffer Query", async () => {
+        // Query for locations within 100m of Central Park
+        // Only Central Park itself should be within 100m of its own coordinates
         const response = await request(app)
             .get("/items/locations")
             .set("Authorization", `Bearer ${adminToken}`)
@@ -266,7 +274,7 @@ describe("PostGIS Spatial Queries", () => {
                                 type: "Point",
                                 coordinates: [-73.9654, 40.7829], // Central Park coordinates
                             },
-                            distance: 1000, // 1 km buffer
+                            distance: 100, // 100m buffer - very tight to ensure only Central Park matches
                         },
                     },
                 }),

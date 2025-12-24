@@ -1208,6 +1208,7 @@ export function nIntersectsOperator(ctx: OperatorContext, value: any): SQL {
 /**
  * Operator: ST_DWithin (within distance)
  * Example: { location: { dwithin: { geometry: geoJSON, distance: 1000, not: false } } }
+ * Uses ST_DistanceSpheroid for accurate earth-surface distance calculations in meters
  */
 export function dwithinOperator(ctx: OperatorContext, value: { geometry: any; distance: number; not?: boolean }): SQL {
   const { geometry, distance, not: negated } = value;
@@ -1223,7 +1224,10 @@ export function dwithinOperator(ctx: OperatorContext, value: { geometry: any; di
     fieldRef = `"${ctx.fieldName}"`;
   }
 
-  const condition = `ST_DWithin(${fieldRef}::geography, ST_SetSRID(ST_GeomFromGeoJSON('${JSON.stringify(geometry)}'), 4326)::geography, ${distance})`;
+  // Use ST_DistanceSpheroid for accurate distance calculations in meters
+  // This is more reliable than ::geography casting across different PostGIS versions
+  const spheroid = `SPHEROID["WGS 84",6378137,298.257223563]`;
+  const condition = `ST_DistanceSpheroid(${fieldRef}, ST_SetSRID(ST_GeomFromGeoJSON('${JSON.stringify(geometry)}'), 4326), '${spheroid}') <= ${distance}`;
 
   return negated ? sql.raw(`NOT (${condition})`) : sql.raw(condition);
 }
