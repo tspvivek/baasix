@@ -1566,6 +1566,132 @@ export const systemSchemas = {
                 ],
             },
         },
+        {
+            collectionName: "baasix_Migration",
+            schema: {
+                name: "Migration",
+                timestamps: true,
+                fields: {
+                    id: {
+                        type: "UUID",
+                        primaryKey: true,
+                        defaultValue: { type: "UUIDV4" },
+                        SystemGenerated: "true",
+                    },
+                    version: {
+                        type: "String",
+                        allowNull: false,
+                        unique: true,
+                        SystemGenerated: "true",
+                        description: "Migration version identifier (e.g., '0.1.0-alpha.7', '20240101_001')",
+                    },
+                    name: {
+                        type: "String",
+                        allowNull: false,
+                        SystemGenerated: "true",
+                        description: "Human-readable migration name",
+                    },
+                    description: {
+                        type: "Text",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "Detailed description of what this migration does",
+                    },
+                    type: {
+                        type: "ENUM",
+                        values: ["system", "schema", "data", "custom"],
+                        defaultValue: "custom",
+                        allowNull: false,
+                        SystemGenerated: "true",
+                        description: "Type of migration: system (core updates), schema (database structure), data (data transformations), custom (user-defined)",
+                    },
+                    status: {
+                        type: "ENUM",
+                        values: ["pending", "running", "completed", "failed", "rolled_back"],
+                        defaultValue: "pending",
+                        allowNull: false,
+                        SystemGenerated: "true",
+                    },
+                    batch: {
+                        type: "Integer",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "Migration batch number for grouping migrations run together",
+                    },
+                    executedAt: {
+                        type: "DateTime",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "When the migration was successfully executed",
+                    },
+                    executionTimeMs: {
+                        type: "Integer",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "Time taken to execute the migration in milliseconds",
+                    },
+                    errorMessage: {
+                        type: "Text",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "Error message if migration failed",
+                    },
+                    errorStack: {
+                        type: "Text",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "Error stack trace if migration failed",
+                    },
+                    metadata: {
+                        type: "JSONB",
+                        defaultValue: {},
+                        SystemGenerated: "true",
+                        description: "Additional metadata about the migration (affected tables, records modified, etc.)",
+                    },
+                    checksum: {
+                        type: "String",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "Checksum of migration script for integrity verification",
+                    },
+                    canRollback: {
+                        type: "Boolean",
+                        defaultValue: false,
+                        SystemGenerated: "true",
+                        description: "Whether this migration can be rolled back",
+                    },
+                    rolledBackAt: {
+                        type: "DateTime",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "When the migration was rolled back (if applicable)",
+                    },
+                },
+                indexes: [
+                    {
+                        fields: ["version"],
+                        unique: true,
+                        name: "baasix_Migration_version_unique",
+                        SystemGenerated: "true",
+                    },
+                    {
+                        fields: ["status"],
+                        name: "baasix_Migration_status_idx",
+                        SystemGenerated: "true",
+                    },
+                    {
+                        fields: ["batch"],
+                        name: "baasix_Migration_batch_idx",
+                        SystemGenerated: "true",
+                    },
+                    {
+                        fields: ["executedAt"],
+                        name: "baasix_Migration_executedAt_idx",
+                        SystemGenerated: "true",
+                    },
+                ],
+            },
+        },
     ],
 };
 

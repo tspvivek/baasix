@@ -24,6 +24,7 @@ import { rateLimit } from "express-rate-limit";
 import socketService from "./services/SocketService.js";
 import tasksService from "./services/TasksService.js";
 import workflowService from "./services/WorkflowService.js";
+import migrationService from "./services/MigrationService.js";
 import cors from "cors";
 import settingsService from "./services/SettingsService.js";
 import { sql } from "drizzle-orm";
@@ -165,8 +166,18 @@ async function initializeApp() {
       : null;
     initializeCache({ ttl: parseInt(env.get("CACHE_TTL") || "30") * 1000, uri: cacheUri });
 
+    // IMPORTANT: Detect Sequelize upgrade BEFORE schema initialization
+    // because schemaManager.initialize() will create the baasix_Migration table
+    console.info("Checking for Sequelize to Drizzle upgrade...");
+    const isUpgrade = await migrationService.detectUpgradeBeforeSchemaInit();
+
     console.info("Initializing schema registry...");
     await schemaManager.initialize();
+
+    console.info("Initializing migration service...");
+    await migrationService.init(isUpgrade);
+    // Run pending migrations if auto-run is enabled
+    await migrationService.runStartupMigrations();
 
     console.info("Initializing settings service...");
     await settingsService.loadSettings();

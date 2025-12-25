@@ -31,6 +31,16 @@ export { default as SocketService } from './services/SocketService.js';
 export { default as StatsService } from './services/StatsService.js';
 export { default as TasksService } from './services/TasksService.js';
 export { default as WorkflowService } from './services/WorkflowService.js';
+export { default as MigrationService } from './services/MigrationService.js';
+export type { 
+  MigrationStatus, 
+  MigrationType, 
+  MigrationRecord, 
+  MigrationScript, 
+  MigrationContext, 
+  MigrationResult,
+  MigrationRunOptions 
+} from './services/MigrationService.js';
 export { 
   BaasixDrizzleCache,
   getCacheService,
