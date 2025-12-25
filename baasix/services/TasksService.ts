@@ -335,7 +335,16 @@ class TasksService {
   }
 }
 
-// Create and export singleton instance
-const tasksService = new TasksService();
+// Use globalThis to ensure singleton across different module loading paths
+declare global {
+  var __baasix_tasksService: TasksService | undefined;
+}
+
+// Create singleton instance only if it doesn't exist
+if (!globalThis.__baasix_tasksService) {
+  globalThis.__baasix_tasksService = new TasksService();
+}
+
+const tasksService = globalThis.__baasix_tasksService;
 
 export default tasksService;

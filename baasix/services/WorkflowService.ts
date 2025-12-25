@@ -2134,7 +2134,16 @@ class WorkflowService {
     }
 }
 
-// Create and export singleton instance
-const workflowService = new WorkflowService();
+// Use globalThis to ensure singleton across different module loading paths
+declare global {
+  var __baasix_workflowService: WorkflowService | undefined;
+}
+
+// Create singleton instance only if it doesn't exist
+if (!globalThis.__baasix_workflowService) {
+  globalThis.__baasix_workflowService = new WorkflowService();
+}
+
+const workflowService = globalThis.__baasix_workflowService;
 
 export default workflowService;

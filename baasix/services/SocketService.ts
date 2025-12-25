@@ -347,5 +347,15 @@ class SocketService {
   }
 }
 
-const socketService = new SocketService();
+// Use globalThis to ensure singleton across different module loading paths
+declare global {
+  var __baasix_socketService: SocketService | undefined;
+}
+
+// Create singleton instance only if it doesn't exist
+if (!globalThis.__baasix_socketService) {
+  globalThis.__baasix_socketService = new SocketService();
+}
+
+const socketService = globalThis.__baasix_socketService;
 export default socketService;

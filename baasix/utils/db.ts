@@ -12,14 +12,34 @@ import env from './env.js';
 import { initializeCacheService, getCacheService, closeCacheService } from '../services/CacheService.js';
 import type { Transaction as TransactionType } from '../types/database.js';
 
-let dbInstance: ReturnType<typeof drizzle> | null = null;
-let sql: ReturnType<typeof postgres> | null = null;
-let readSql: ReturnType<typeof postgres> | null = null;
+// Use globalThis to ensure singleton across different module loading paths
+// (e.g., when loaded from both ./baasix/ and ./dist/ or npm package)
+declare global {
+  var __baasix_db: ReturnType<typeof drizzle> | null;
+  var __baasix_sql: ReturnType<typeof postgres> | null;
+  var __baasix_readSql: ReturnType<typeof postgres> | null;
+}
+
+// Initialize globals if not already set
+globalThis.__baasix_db = globalThis.__baasix_db ?? null;
+globalThis.__baasix_sql = globalThis.__baasix_sql ?? null;
+globalThis.__baasix_readSql = globalThis.__baasix_readSql ?? null;
+
+// Use getters to access the global instances
+const getDbInstance = () => globalThis.__baasix_db;
+const setDbInstance = (val: ReturnType<typeof drizzle> | null) => { globalThis.__baasix_db = val; };
+const getSql = () => globalThis.__baasix_sql;
+const setSql = (val: ReturnType<typeof postgres> | null) => { globalThis.__baasix_sql = val; };
+const getReadSql = () => globalThis.__baasix_readSql;
+const setReadSql = (val: ReturnType<typeof postgres> | null) => { globalThis.__baasix_readSql = val; };
 
 const excludeModels = ['baasix_AuditLog', 'baasix_Sessions'];
 
+// Type for drizzle instance
+type DrizzleDb = ReturnType<typeof drizzle>;
+
 // Type for transaction client (what tx is in db.transaction callback)
-export type TransactionClient = Parameters<Parameters<typeof dbInstance.transaction>[0]>[0];
+export type TransactionClient = Parameters<Parameters<DrizzleDb['transaction']>[0]>[0];
 
 // Re-export Transaction from types for backward compatibility
 export type Transaction = TransactionType;
@@ -54,9 +74,8 @@ function getConnectionConfig() {
  * Synchronous function that starts async cache initialization
  */
 export function initializeDatabase() {
-  if (dbInstance) {
-    console.log('Database already initialized');
-    return dbInstance;
+  if (getDbInstance()) {
+    return getDbInstance();
   }
 
   const config = getConnectionConfig();
@@ -64,7 +83,7 @@ export function initializeDatabase() {
   // Start cache service initialization (async) but don't wait
   // The cache will be available for subsequent queries
   initializeCacheService().then(cacheService => {
-    if (cacheService && dbInstance) {
+    if (cacheService && getDbInstance()) {
       console.info('[Database] Cache service initialized and ready');
       // Note: Drizzle cache is set during drizzle() initialization below
       // We can't change it after creation, so cache is passed during init
@@ -78,10 +97,10 @@ export function initializeDatabase() {
     const readReplicaUrls = env.get('DATABASE_READ_REPLICA_URLS')!.split(',').map(url => url.trim());
 
     // Write connection (primary)
-    sql = postgres(env.get('DATABASE_URL')!, {
+    setSql(postgres(env.get('DATABASE_URL')!, {
       ...config,
       debug: env.get('DATABASE_LOGGING') === 'true',
-    });
+    }));
 
     // Read connections (replicas) - use first replica for now
     // In production, could implement load balancing across replicas
@@ -99,30 +118,30 @@ export function initializeDatabase() {
       replicaConfig.ssl = config.ssl;
     }
 
-    readSql = postgres(readReplicaUrls[0], replicaConfig);
+    setReadSql(postgres(readReplicaUrls[0], replicaConfig));
 
-    dbInstance = drizzle(sql, {
+    setDbInstance(drizzle(getSql()!, {
       logger: env.get('DATABASE_LOGGING') === 'true',
       // Cache will be initialized asynchronously and used on subsequent queries
-    });
+    }));
 
     console.info(`Database initialized with read replicas: ${readReplicaUrls.length} replica(s) configured`);
   } else {
     // Single connection
-    sql = postgres(env.get('DATABASE_URL')!, {
+    setSql(postgres(env.get('DATABASE_URL')!, {
       ...config,
       debug: env.get('DATABASE_LOGGING') === 'true',
-    });
+    }));
 
-    dbInstance = drizzle(sql, {
+    setDbInstance(drizzle(getSql()!, {
       logger: env.get('DATABASE_LOGGING') === 'true',
       // Cache will be initialized asynchronously and used on subsequent queries
-    });
+    }));
 
     console.info('Database initialized without read replicas');
   }
 
-  return dbInstance;
+  return getDbInstance()!;
 }
 
 /**
@@ -130,9 +149,8 @@ export function initializeDatabase() {
  * Use this when you need to ensure cache is ready before proceeding
  */
 export async function initializeDatabaseWithCache() {
-  if (dbInstance) {
-    console.log('Database already initialized');
-    return dbInstance;
+  if (getDbInstance()) {
+    return getDbInstance();
   }
 
   const config = getConnectionConfig();
@@ -145,10 +163,10 @@ export async function initializeDatabaseWithCache() {
     const readReplicaUrls = env.get('DATABASE_READ_REPLICA_URLS')!.split(',').map(url => url.trim());
 
     // Write connection (primary)
-    sql = postgres(env.get('DATABASE_URL')!, {
+    setSql(postgres(env.get('DATABASE_URL')!, {
       ...config,
       debug: env.get('DATABASE_LOGGING') === 'true',
-    });
+    }));
 
     // Read connections (replicas)
     const replicaConfig: postgres.Options<{}> = {
@@ -164,66 +182,83 @@ export async function initializeDatabaseWithCache() {
       replicaConfig.ssl = config.ssl;
     }
 
-    readSql = postgres(readReplicaUrls[0], replicaConfig);
+    setReadSql(postgres(readReplicaUrls[0], replicaConfig));
 
-    dbInstance = drizzle(sql, {
+    setDbInstance(drizzle(getSql()!, {
       logger: env.get('DATABASE_LOGGING') === 'true',
       cache: cacheService || undefined,
-    } as any);
+    } as any));
 
     console.info(`Database initialized with read replicas and cache: ${readReplicaUrls.length} replica(s) configured`);
   } else {
     // Single connection
-    sql = postgres(env.get('DATABASE_URL')!, {
+    setSql(postgres(env.get('DATABASE_URL')!, {
       ...config,
       debug: env.get('DATABASE_LOGGING') === 'true',
-    });
+    }));
 
-    dbInstance = drizzle(sql, {
+    setDbInstance(drizzle(getSql()!, {
       logger: env.get('DATABASE_LOGGING') === 'true',
       cache: cacheService || undefined,
-    } as any);
+    } as any));
 
     console.info('Database initialized with cache (no read replicas)');
   }
 
-  return dbInstance;
+  return getDbInstance()!;
 }
 
 /**
  * Get database instance (synchronous - initializes if needed)
  */
 export function getDatabase() {
-  if (!dbInstance) {
+  if (!getDbInstance()) {
     return initializeDatabase();
   }
-  return dbInstance;
+  return getDbInstance()!;
 }
 
-// Export db as the main database instance (lazy initialization)
-export const db = getDatabase();
+// Export db as a getter to always return the current instance
+// This ensures that even if the module is loaded from different paths,
+// we always get the same database instance
+export const db = new Proxy({} as ReturnType<typeof drizzle>, {
+  get(_, prop) {
+    const instance = getDatabase();
+    const value = (instance as any)[prop];
+    return typeof value === 'function' ? value.bind(instance) : value;
+  },
+});
 
 /**
  * Get postgres SQL client (for raw queries)
  */
 export function getSqlClient() {
-  if (!sql) {
+  if (!getSql()) {
     initializeDatabase();
   }
-  return sql!;
+  return getSql()!;
 }
 
 // Export sql for backward compatibility
-export const sqlClient = getSqlClient();
+export const sqlClient = new Proxy({} as ReturnType<typeof postgres>, {
+  get(_, prop) {
+    const instance = getSqlClient();
+    const value = (instance as any)[prop];
+    return typeof value === 'function' ? value.bind(instance) : value;
+  },
+  apply(_, thisArg, args) {
+    return getSqlClient().apply(thisArg, args as any);
+  },
+}) as ReturnType<typeof postgres>;
 
 /**
  * Get read replica SQL client (if configured)
  */
 export function getReadSqlClient() {
-  if (!sql) {
+  if (!getSql()) {
     initializeDatabase();
   }
-  return readSql || sql!;
+  return getReadSql() || getSql()!;
 }
 
 /**
@@ -233,15 +268,18 @@ export async function closeDatabase(): Promise<void> {
   // Close cache service first
   await closeCacheService();
 
+  const sql = getSql();
+  const readSql = getReadSql();
+  
   if (sql) {
     await sql.end();
-    sql = null;
+    setSql(null);
   }
   if (readSql) {
     await readSql.end();
-    readSql = null;
+    setReadSql(null);
   }
-  dbInstance = null;
+  setDbInstance(null);
   console.info('Database connections closed');
 }
 

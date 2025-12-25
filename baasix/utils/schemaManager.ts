@@ -10,6 +10,11 @@ import type { SchemaDefinition } from '../types/index.js';
 
 const systemSchemas = systemSchemaModule.schemas;
 
+// Use globalThis to ensure singleton across different module loading paths
+declare global {
+  var __baasix_schemaManager: SchemaManager | undefined;
+}
+
 /**
  * baasix_SchemaDefinition table schema
  * Note: This is duplicated from schema.ts to avoid circular dependency
@@ -37,10 +42,11 @@ export class SchemaManager {
    * Get singleton instance
    */
   static getInstance(): SchemaManager {
-    if (!SchemaManager.instance) {
-      SchemaManager.instance = new SchemaManager();
+    // Use globalThis to ensure singleton across different module loading paths
+    if (!globalThis.__baasix_schemaManager) {
+      globalThis.__baasix_schemaManager = new SchemaManager();
     }
-    return SchemaManager.instance;
+    return globalThis.__baasix_schemaManager;
   }
 
   /**

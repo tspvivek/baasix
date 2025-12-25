@@ -22,22 +22,23 @@ class MailService {
   private defaultLogoPath: string;
   private customLogoPath: string;
   private logo: Buffer | null = null;
+  private initialized: boolean = false;
 
   constructor() {
-    console.info("------------------------------");
-    console.info("Initializing Mail Service");
-    console.info("------------------------------");
-
     this.engine = new Liquid();
     this.defaultTemplatePath = path.join(_dirname, "../templates/mails/default.liquid");
     this.customTemplatesPath = path.join(process.cwd(), "extensions/baasix-templates/mails");
     this.defaultLogoPath = path.join(_dirname, "../templates/logo/logo.png");
     this.customLogoPath = path.join(process.cwd(), "extensions/baasix-templates/logo/logo.png");
-
-    this.initialize();
+    // Note: initialize() is now called explicitly from app.ts, not in constructor
   }
 
   async initialize(): Promise<void> {
+    // Prevent double initialization
+    if (this.initialized) {
+      return;
+    }
+    this.initialized = true;
     const sendersEnabled = this.getSendersEnabled();
 
     if (sendersEnabled.length === 0) {
@@ -371,7 +372,16 @@ class MailService {
   }
 }
 
-// Create and export a singleton instance
-const mailService = new MailService();
+// Use globalThis to ensure singleton across different module loading paths
+declare global {
+  var __baasix_mailService: MailService | undefined;
+}
+
+// Create singleton instance only if it doesn't exist
+if (!globalThis.__baasix_mailService) {
+  globalThis.__baasix_mailService = new MailService();
+}
+
+const mailService = globalThis.__baasix_mailService;
 
 export default mailService;

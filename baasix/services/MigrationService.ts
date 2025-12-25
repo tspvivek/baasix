@@ -4,12 +4,12 @@ import { eq, desc, and, sql } from "drizzle-orm";
 import path from "path";
 import fs from "fs/promises";
 import crypto from "crypto";
-import { fileURLToPath } from "url";
 import env from "../utils/env.js";
 
-// ES module __dirname equivalent
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// In test environment (Jest/CommonJS), use Jest globals, in production (ESM) use process.cwd() fallback
+const _dirname = typeof __dirname !== 'undefined'
+  ? __dirname
+  : process.cwd() + '/baasix/services';
 
 /**
  * Migration status enum
@@ -113,7 +113,7 @@ class MigrationService {
     // Default migrations directory - can be overridden via env
     this.migrationsDir = env.get("MIGRATIONS_DIR") || path.join(process.cwd(), "migrations");
     // System migrations directory inside baasix
-    this.systemMigrationsDir = path.join(__dirname, "..", "migrations");
+    this.systemMigrationsDir = path.join(_dirname, "..", "migrations");
   }
 
   /**
@@ -1144,7 +1144,7 @@ export default { version, name, description, type, up, down };
     } catch {
       // Try direct package.json if running from source
       try {
-        const packagePath = path.join(import.meta.dirname || __dirname, "..", "..", "package.json");
+        const packagePath = path.join(_dirname, "..", "..", "package.json");
         const packageJson = JSON.parse(await fs.readFile(packagePath, "utf-8"));
         return packageJson.version;
       } catch {
@@ -1177,7 +1177,16 @@ export default { version, name, description, type, up, down };
   }
 }
 
-// Export singleton instance
-const migrationService = new MigrationService();
+// Use globalThis to ensure singleton across different module loading paths
+declare global {
+  var __baasix_migrationService: MigrationService | undefined;
+}
+
+// Create singleton instance only if it doesn't exist
+if (!globalThis.__baasix_migrationService) {
+  globalThis.__baasix_migrationService = new MigrationService();
+}
+
+const migrationService = globalThis.__baasix_migrationService;
 export default migrationService;
 export { MigrationService };

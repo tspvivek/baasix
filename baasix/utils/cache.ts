@@ -35,21 +35,41 @@ export interface CacheInterface {
   isRedisEnabled(): boolean;
 }
 
-let cache: CacheInterface | null = null;
-let redisClient: Redis | null = null;
-let syncInterval: NodeJS.Timeout | null = null;
-let isRedisEnabled = false;
+// Use globalThis to ensure singleton state across different module loading paths
+declare global {
+  var __baasix_cache: CacheInterface | null;
+  var __baasix_redisClient: Redis | null;
+  var __baasix_syncInterval: NodeJS.Timeout | null;
+  var __baasix_isRedisEnabled: boolean;
+  var __baasix_l1Cache: Map<string, { value: string; expiry: number }>;
+  var __baasix_lastSyncedVersion: string | null;
+}
+
+// Initialize globals if not already set
+globalThis.__baasix_cache = globalThis.__baasix_cache ?? null;
+globalThis.__baasix_redisClient = globalThis.__baasix_redisClient ?? null;
+globalThis.__baasix_syncInterval = globalThis.__baasix_syncInterval ?? null;
+globalThis.__baasix_isRedisEnabled = globalThis.__baasix_isRedisEnabled ?? false;
+globalThis.__baasix_l1Cache = globalThis.__baasix_l1Cache ?? new Map<string, { value: string; expiry: number }>();
+globalThis.__baasix_lastSyncedVersion = globalThis.__baasix_lastSyncedVersion ?? null;
+
+// Getters/setters for global state
+const getGlobalCache = () => globalThis.__baasix_cache;
+const setGlobalCache = (val: CacheInterface | null) => { globalThis.__baasix_cache = val; };
+const getRedisClient = () => globalThis.__baasix_redisClient;
+const setRedisClient = (val: Redis | null) => { globalThis.__baasix_redisClient = val; };
+const getSyncInterval = () => globalThis.__baasix_syncInterval;
+const setSyncInterval = (val: NodeJS.Timeout | null) => { globalThis.__baasix_syncInterval = val; };
+const getIsRedisEnabled = () => globalThis.__baasix_isRedisEnabled;
+const setIsRedisEnabled = (val: boolean) => { globalThis.__baasix_isRedisEnabled = val; };
+const getL1Cache = () => globalThis.__baasix_l1Cache;
+const getLastSyncedVersion = () => globalThis.__baasix_lastSyncedVersion;
+const setLastSyncedVersion = (val: string | null) => { globalThis.__baasix_lastSyncedVersion = val; };
 
 const CACHE_SIZE_GB = parseFloat(env.get("CACHE_SIZE_GB") || "1");
 const CACHE_SIZE_BYTES = CACHE_SIZE_GB * 1024 * 1024 * 1024;
 // Sync interval for L1 ← L2 synchronization (default: 5 seconds)
 const CACHE_SYNC_INTERVAL_MS = (parseInt(env.get("CACHE_SYNC_INTERVAL") || "5")) * 1000;
-
-// L1 Cache: Always in-memory for fast reads
-const l1Cache = new Map<string, { value: string; expiry: number }>();
-
-// Track L2 version for change detection
-let lastSyncedVersion: string | null = null;
 
 /**
  * Keys that use hybrid L1+L2 caching
@@ -76,6 +96,9 @@ const isProtectedKey = (key: string): boolean => {
  * This runs periodically to keep L1 in sync with L2
  */
 async function syncFromRedis(): Promise<void> {
+  const redisClient = getRedisClient();
+  const l1Cache = getL1Cache();
+  
   if (!redisClient) return;
   
   try {
@@ -83,7 +106,7 @@ async function syncFromRedis(): Promise<void> {
     const currentVersion = await redisClient.get("cache:version");
     
     // Skip if version hasn't changed
-    if (currentVersion === lastSyncedVersion) {
+    if (currentVersion === getLastSyncedVersion()) {
       return;
     }
     
@@ -104,7 +127,7 @@ async function syncFromRedis(): Promise<void> {
       }
     }
     
-    lastSyncedVersion = currentVersion;
+    setLastSyncedVersion(currentVersion);
     console.info(`[Cache Sync] L1 synchronized from L2 (version: ${currentVersion})`);
   } catch (error: any) {
     console.error("[Cache Sync] Error syncing from Redis:", error.message);
@@ -115,6 +138,7 @@ async function syncFromRedis(): Promise<void> {
  * Increment the cache version in Redis to signal changes to other instances
  */
 async function incrementCacheVersion(): Promise<void> {
+  const redisClient = getRedisClient();
   if (!redisClient) return;
   
   try {
@@ -128,11 +152,12 @@ async function incrementCacheVersion(): Promise<void> {
  * Start periodic sync from Redis to Memory
  */
 function startSyncInterval(): void {
-  if (syncInterval || !redisClient) return;
+  const redisClient = getRedisClient();
+  if (getSyncInterval() || !redisClient) return;
   
-  syncInterval = setInterval(async () => {
+  setSyncInterval(setInterval(async () => {
     await syncFromRedis();
-  }, CACHE_SYNC_INTERVAL_MS);
+  }, CACHE_SYNC_INTERVAL_MS));
   
   console.info(`[Cache] Started L1←L2 sync every ${CACHE_SYNC_INTERVAL_MS / 1000}s`);
 }
@@ -141,9 +166,10 @@ function startSyncInterval(): void {
  * Stop periodic sync
  */
 function stopSyncInterval(): void {
-  if (syncInterval) {
-    clearInterval(syncInterval);
-    syncInterval = null;
+  const interval = getSyncInterval();
+  if (interval) {
+    clearInterval(interval);
+    setSyncInterval(null);
   }
 }
 
@@ -151,6 +177,8 @@ function stopSyncInterval(): void {
  * Ensure cache size doesn't exceed limit
  */
 async function ensureCacheSize(): Promise<void> {
+  const redisClient = getRedisClient();
+  const l1Cache = getL1Cache();
   let currentSize: number;
   
   if (redisClient) {
@@ -217,6 +245,11 @@ async function ensureCacheSize(): Promise<void> {
  * Initialize cache with hybrid L1/L2 support
  */
 export function initializeCache(options: { ttl: number; uri?: string | null }): void {
+  // Skip if already initialized
+  if (getGlobalCache()) {
+    return;
+  }
+  
   const defaultTTL = Math.floor(options.ttl / 1000); // Convert ms to seconds
   const uri = options.uri;
   
@@ -226,8 +259,8 @@ export function initializeCache(options: { ttl: number; uri?: string | null }): 
                          uri && uri.toLowerCase() !== "null" && uri !== "undefined" && uri !== "";
   
   if (shouldUseRedis) {
-    redisClient = new Redis(uri!);
-    isRedisEnabled = true;
+    setRedisClient(new Redis(uri!));
+    setIsRedisEnabled(true);
     
     // Initial sync from Redis
     syncFromRedis().then(() => {
@@ -241,16 +274,19 @@ export function initializeCache(options: { ttl: number; uri?: string | null }): 
     
     console.info("[Cache] Hybrid L1(Memory)+L2(Redis) cache initialized");
   } else {
-    isRedisEnabled = false;
+    setIsRedisEnabled(false);
     console.info("[Cache] In-memory only cache initialized");
   }
   
-  cache = {
+  const cacheImpl: CacheInterface = {
     /**
      * GET: For hybrid keys, always read from L1 (memory) for speed
      * For non-hybrid keys, read from Redis if available
      */
     get: async (key: string): Promise<any | null> => {
+      const l1Cache = getL1Cache();
+      const redisClient = getRedisClient();
+      
       // Hybrid keys: Always read from L1 (memory)
       if (isHybridKey(key)) {
         const item = l1Cache.get(key);
@@ -287,6 +323,8 @@ export function initializeCache(options: { ttl: number; uri?: string | null }): 
      */
     set: async (key: string, value: any, expiresIn: number = defaultTTL): Promise<void> => {
       await ensureCacheSize();
+      const l1Cache = getL1Cache();
+      const redisClient = getRedisClient();
       const jsonValue = JSON.stringify(value);
       
       // Hybrid keys: Write to both L1 and L2
@@ -313,6 +351,7 @@ export function initializeCache(options: { ttl: number; uri?: string | null }): 
           await redisClient.set(key, jsonValue, "EX", expiresIn);
         }
       } else {
+        const l1Cache = getL1Cache();
         const expiry = (expiresIn === -1 || expiresIn === 0) 
           ? -1 
           : Date.now() + expiresIn * 1000;
@@ -324,6 +363,9 @@ export function initializeCache(options: { ttl: number; uri?: string | null }): 
      * DELETE: For hybrid keys, delete from both L1 and L2
      */
     delete: async (key: string): Promise<void> => {
+      const l1Cache = getL1Cache();
+      const redisClient = getRedisClient();
+      
       // Always delete from L1
       l1Cache.delete(key);
       
@@ -340,13 +382,16 @@ export function initializeCache(options: { ttl: number; uri?: string | null }): 
      * DEL: Alias for delete
      */
     del: async (key: string): Promise<void> => {
-      await cache!.delete(key);
+      await cacheImpl.delete(key);
     },
     
     /**
      * CLEAR: Clear all caches
      */
     clear: async (): Promise<void> => {
+      const l1Cache = getL1Cache();
+      const redisClient = getRedisClient();
+      
       l1Cache.clear();
       if (redisClient) {
         await redisClient.flushdb();
@@ -359,6 +404,9 @@ export function initializeCache(options: { ttl: number; uri?: string | null }): 
      * INVALIDATE MODEL: Delete all keys matching a pattern
      */
     invalidateModel: async (modelName: string): Promise<void> => {
+      const l1Cache = getL1Cache();
+      const redisClient = getRedisClient();
+      
       // Clear from L1
       for (const key of l1Cache.keys()) {
         if (key.startsWith(`${modelName}:`)) {
@@ -380,6 +428,9 @@ export function initializeCache(options: { ttl: number; uri?: string | null }): 
      * TRY LOCK: Distributed lock (only works with Redis)
      */
     tryLock: async (key: string, ttlSeconds: number = 300): Promise<boolean> => {
+      const l1Cache = getL1Cache();
+      const redisClient = getRedisClient();
+      
       if (redisClient) {
         const result = await redisClient.set(
           key,
@@ -408,6 +459,9 @@ export function initializeCache(options: { ttl: number; uri?: string | null }): 
      * UNLOCK: Release a lock
      */
     unlock: async (key: string): Promise<void> => {
+      const l1Cache = getL1Cache();
+      const redisClient = getRedisClient();
+      
       if (redisClient) {
         await redisClient.del(key);
       } else {
@@ -419,6 +473,9 @@ export function initializeCache(options: { ttl: number; uri?: string | null }): 
      * SET IF NOT EXISTS: Atomic set only if key doesn't exist
      */
     setIfNotExists: async (key: string, value: any, expiresIn: number = defaultTTL): Promise<boolean> => {
+      const l1Cache = getL1Cache();
+      const redisClient = getRedisClient();
+      
       if (redisClient) {
         const result = await redisClient.set(
           key,
@@ -449,7 +506,7 @@ export function initializeCache(options: { ttl: number; uri?: string | null }): 
      * Force immediate sync from Redis to Memory
      */
     forceSync: async (): Promise<void> => {
-      if (redisClient) {
+      if (getRedisClient()) {
         await syncFromRedis();
       }
     },
@@ -457,21 +514,24 @@ export function initializeCache(options: { ttl: number; uri?: string | null }): 
     /**
      * Check if Redis is enabled
      */
-    isRedisEnabled: (): boolean => isRedisEnabled,
+    isRedisEnabled: (): boolean => getIsRedisEnabled(),
   };
+  
+  setGlobalCache(cacheImpl);
 }
 
 /**
  * Check if cache has been initialized
  */
 export function isCacheInitialized(): boolean {
-  return cache !== null;
+  return getGlobalCache() !== null;
 }
 
 /**
  * Get cache instance (singleton)
  */
 export function getCache(): CacheInterface {
+  const cache = getGlobalCache();
   if (!cache) {
     throw new Error("Cache has not been initialized. Call initializeCache first.");
   }
@@ -484,11 +544,13 @@ export function getCache(): CacheInterface {
 export async function closeCache(): Promise<void> {
   stopSyncInterval();
   
+  const redisClient = getRedisClient();
   if (redisClient) {
     await redisClient.quit();
-    redisClient = null;
+    setRedisClient(null);
     console.info("[Cache] Redis connection closed");
   }
   
-  l1Cache.clear();
+  getL1Cache().clear();
+  setGlobalCache(null);
 }

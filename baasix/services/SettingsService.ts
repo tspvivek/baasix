@@ -524,6 +524,15 @@ class SettingsService {
   }
 }
 
-// Create and export singleton instance
-const settingsService = new SettingsService();
+// Use globalThis to ensure singleton across different module loading paths
+declare global {
+  var __baasix_settingsService: SettingsService | undefined;
+}
+
+// Create singleton instance only if it doesn't exist
+if (!globalThis.__baasix_settingsService) {
+  globalThis.__baasix_settingsService = new SettingsService();
+}
+
+const settingsService = globalThis.__baasix_settingsService;
 export default settingsService;

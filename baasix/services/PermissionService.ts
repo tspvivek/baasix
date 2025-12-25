@@ -456,7 +456,16 @@ export class PermissionService {
   }
 }
 
-// Create and export singleton instance
-const permissionService = new PermissionService();
+// Use globalThis to ensure singleton across different module loading paths
+declare global {
+  var __baasix_permissionService: PermissionService | undefined;
+}
+
+// Create singleton instance only if it doesn't exist
+if (!globalThis.__baasix_permissionService) {
+  globalThis.__baasix_permissionService = new PermissionService();
+}
+
+const permissionService = globalThis.__baasix_permissionService;
 export { permissionService };
 export default permissionService;

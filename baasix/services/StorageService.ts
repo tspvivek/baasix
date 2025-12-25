@@ -183,5 +183,15 @@ class StorageService {
   }
 }
 
-const storageService = new StorageService();
+// Use globalThis to ensure singleton across different module loading paths
+declare global {
+  var __baasix_storageService: StorageService | undefined;
+}
+
+// Create singleton instance only if it doesn't exist
+if (!globalThis.__baasix_storageService) {
+  globalThis.__baasix_storageService = new StorageService();
+}
+
+const storageService = globalThis.__baasix_storageService;
 export default storageService;

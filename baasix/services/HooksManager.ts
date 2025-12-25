@@ -227,44 +227,58 @@ export class HooksManager {
 }
 
 // Export singleton instance
-export const hooksManager = new HooksManager();
+// Use globalThis to ensure singleton across different module loading paths
+declare global {
+  var __baasix_hooksManager: HooksManager | undefined;
+  var __baasix_hooksManagerInitialized: boolean | undefined;
+}
 
-// Register global beforeCreate hook for auto-sort functionality
-hooksManager.registerHook('*', 'items.create', async (context: HookContext) => {
-  const { data, collection } = context;
+// Create singleton instance only if it doesn't exist
+if (!globalThis.__baasix_hooksManager) {
+  globalThis.__baasix_hooksManager = new HooksManager();
+}
 
-  if (!data) {
-    return context;
-  }
+export const hooksManager = globalThis.__baasix_hooksManager;
 
-  try {
-    // Get the Drizzle table schema (using statically imported schemaManager)
-    const table = schemaManager.getTable(collection);
+// Register global beforeCreate hook for auto-sort functionality (only once)
+if (!globalThis.__baasix_hooksManagerInitialized) {
+  globalThis.__baasix_hooksManagerInitialized = true;
+  hooksManager.registerHook('*', 'items.create', async (context: HookContext) => {
+    const { data, collection } = context;
 
-    // Check if table has a 'sort' column by trying to access it
-    if (table && table.sort) {
-      // If sort is not provided or is null/undefined, auto-increment it
-      if (data.sort === undefined || data.sort === null) {
-        const db = getDatabase();
-
-        // Query for max sort value
-        const result = await db.execute(sql`
-          SELECT COALESCE(MAX("sort"), 0) as max_sort
-          FROM "${sql.raw(collection)}"
-        `);
-
-        const maxSort = result[0]?.max_sort || 0;
-        data.sort = Number(maxSort) + 1;
-        console.log(`[HooksManager] Auto-assigned sort value ${data.sort} for ${collection}`);
-      }
+    if (!data) {
+      return context;
     }
-  } catch (error) {
-    // If query fails, silently ignore (sort field might not exist)
-    console.warn(`Failed to auto-increment sort for ${collection}:`, error.message);
-  }
 
-  return context;
-});
+    try {
+      // Get the Drizzle table schema (using statically imported schemaManager)
+      const table = schemaManager.getTable(collection);
+
+      // Check if table has a 'sort' column by trying to access it
+      if (table && table.sort) {
+        // If sort is not provided or is null/undefined, auto-increment it
+        if (data.sort === undefined || data.sort === null) {
+          const db = getDatabase();
+
+          // Query for max sort value
+          const result = await db.execute(sql`
+            SELECT COALESCE(MAX("sort"), 0) as max_sort
+            FROM "${sql.raw(collection)}"
+          `);
+
+          const maxSort = result[0]?.max_sort || 0;
+          data.sort = Number(maxSort) + 1;
+          console.log(`[HooksManager] Auto-assigned sort value ${data.sort} for ${collection}`);
+        }
+      }
+    } catch (error: any) {
+      // If query fails, silently ignore (sort field might not exist)
+      console.warn(`Failed to auto-increment sort for ${collection}:`, error.message);
+    }
+
+    return context;
+  });
+}
 
 export default hooksManager;
 
