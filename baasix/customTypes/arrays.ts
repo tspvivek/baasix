@@ -6,6 +6,96 @@
 import { customType } from 'drizzle-orm/pg-core';
 
 /**
+ * Helper function to safely parse array values from driver
+ * Handles: null, undefined, empty string, already-parsed arrays, and string representations
+ */
+function parseArrayValue<T>(
+  value: unknown,
+  mapper: (v: string) => T
+): T[] {
+  // Handle null/undefined
+  if (value == null) return [];
+  
+  // Already an array (driver already parsed it)
+  if (Array.isArray(value)) {
+    return value.map(v => {
+      if (v == null) return v as unknown as T;
+      return mapper(String(v));
+    });
+  }
+  
+  // Not a string - try to convert
+  if (typeof value !== 'string') {
+    return [];
+  }
+  
+  // Empty array representation
+  if (value === '{}' || value === '') return [];
+  
+  // Parse string representation like "{1,2,3}"
+  return value.replace(/[{}]/g, '').split(',').map(mapper);
+}
+
+/**
+ * Helper function specifically for boolean arrays
+ * Handles various boolean representations from PostgreSQL
+ */
+function parseBooleanArrayValue(value: unknown): boolean[] {
+  // Handle null/undefined
+  if (value == null) return [];
+  
+  // Already an array
+  if (Array.isArray(value)) {
+    return value.map(v => {
+      if (v == null) return false;
+      if (typeof v === 'boolean') return v;
+      const str = String(v).toLowerCase();
+      return str === 't' || str === 'true' || str === '1';
+    });
+  }
+  
+  // Not a string
+  if (typeof value !== 'string') {
+    return [];
+  }
+  
+  // Empty array
+  if (value === '{}' || value === '') return [];
+  
+  // Parse string representation
+  return value.replace(/[{}]/g, '').split(',').map(v => {
+    const str = v.toLowerCase();
+    return str === 't' || str === 'true' || str === '1';
+  });
+}
+
+/**
+ * Helper for text arrays that need quote handling
+ */
+function parseTextArrayValue(value: unknown): string[] {
+  // Handle null/undefined
+  if (value == null) return [];
+  
+  // Already an array
+  if (Array.isArray(value)) {
+    return value.map(v => v == null ? '' : String(v));
+  }
+  
+  // Not a string
+  if (typeof value !== 'string') {
+    return [];
+  }
+  
+  // Empty array
+  if (value === '{}' || value === '') return [];
+  
+  // Parse string representation
+  return value.replace(/^{|}$/g, '').split(',').map(v => 
+    v.replace(/^"|"$/g, '').replace(/\\"/g, '"')
+  );
+}
+
+/**
  * Array of integers
  * Usage: arrayInteger('tags')
  */
@@ -19,9 +109,8 @@ export const arrayInteger = (name: string) => customType<{
   toDriver(value: number[]) {
     return `{${value.join(',')}}`;
   },
-  fromDriver(value: string) {
-    if (!value || value === '{}') return [];
-    return value.replace(/[{}]/g, '').split(',').map(Number);
+  fromDriver(value: unknown) {
+    return parseArrayValue(value, Number);
   },
 })(name);
 
@@ -39,9 +128,8 @@ export const arrayBigInt = (name: string) => customType<{
   toDriver(value: bigint[]) {
     return `{${value.join(',')}}`;
   },
-  fromDriver(value: string) {
-    if (!value || value === '{}') return [];
-    return value.replace(/[{}]/g, '').split(',').map(BigInt);
+  fromDriver(value: unknown) {
+    return parseArrayValue(value, BigInt);
   },
 })(name);
 
@@ -61,12 +149,8 @@ export const arrayText = (name: string) => customType<{
     const escaped = value.map(v => `"${v.replace(/"/g, '\\"')}"`);
     return `{${escaped.join(',')}}`;
   },
-  fromDriver(value: string) {
-    if (!value || value === '{}') return [];
-    // Simple parser - may need enhancement for complex cases
-    return value.replace(/^{|}$/g, '').split(',').map(v => 
-      v.replace(/^"|"$/g, '').replace(/\\"/g, '"')
-    );
+  fromDriver(value: unknown) {
+    return parseTextArrayValue(value);
   },
 })(name);
 
@@ -90,9 +174,8 @@ export const arrayUuid = (name: string) => customType<{
   toDriver(value: string[]) {
     return `{${value.join(',')}}`;
   },
-  fromDriver(value: string) {
-    if (!value || value === '{}') return [];
-    return value.replace(/[{}]/g, '').split(',');
+  fromDriver(value: unknown) {
+    return parseArrayValue(value, String);
   },
 })(name);
 
@@ -110,9 +193,8 @@ export const arrayBoolean = (name: string) => customType<{
   toDriver(value: boolean[]) {
     return `{${value.join(',')}}`;
   },
-  fromDriver(value: string) {
-    if (!value || value === '{}') return [];
-    return value.replace(/[{}]/g, '').split(',').map(v => v === 't' || v === 'true');
+  fromDriver(value: unknown) {
+    return parseBooleanArrayValue(value);
   },
 })(name);
 
@@ -130,9 +212,8 @@ export const arrayDecimal = (name: string) => customType<{
   toDriver(value: number[]) {
     return `{${value.join(',')}}`;
   },
-  fromDriver(value: string) {
-    if (!value || value === '{}') return [];
-    return value.replace(/[{}]/g, '').split(',').map(Number);
+  fromDriver(value: unknown) {
+    return parseArrayValue(value, Number);
   },
 })(name);
 
@@ -150,9 +231,8 @@ export const arrayDouble = (name: string) => customType<{
   toDriver(value: number[]) {
     return `{${value.join(',')}}`;
   },
-  fromDriver(value: string) {
-    if (!value || value === '{}') return [];
-    return value.replace(/[{}]/g, '').split(',').map(Number);
+  fromDriver(value: unknown) {
+    return parseArrayValue(value, Number);
   },
 })(name);
 
@@ -175,9 +255,8 @@ export const arrayDateTimeTz = (name: string) => customType<{
     });
     return `{${timestamps.join(',')}}`;
   },
-  fromDriver(value: string) {
-    if (!value || value === '{}') return [];
-    return value.replace(/[{}]/g, '').split(',').map(v => new Date(v));
+  fromDriver(value: unknown) {
+    return parseArrayValue(value, v => new Date(v));
   },
 })(name);
 
@@ -200,9 +279,8 @@ export const arrayDateTime = (name: string) => customType<{
     });
     return `{${timestamps.join(',')}}`;
   },
-  fromDriver(value: string) {
-    if (!value || value === '{}') return [];
-    return value.replace(/[{}]/g, '').split(',').map(v => new Date(v));
+  fromDriver(value: unknown) {
+    return parseArrayValue(value, v => new Date(v));
   },
 })(name);
 
@@ -226,9 +304,8 @@ export const arrayDateOnly = (name: string) => customType<{
   toDriver(value: string[]) {
     return `{${value.join(',')}}`;
   },
-  fromDriver(value: string) {
-    if (!value || value === '{}') return [];
-    return value.replace(/[{}]/g, '').split(',');
+  fromDriver(value: unknown) {
+    return parseArrayValue(value, String);
   },
 })(name);
 
@@ -246,9 +323,8 @@ export const arrayTimeTz = (name: string) => customType<{
   toDriver(value: string[]) {
     return `{${value.join(',')}}`;
   },
-  fromDriver(value: string) {
-    if (!value || value === '{}') return [];
-    return value.replace(/[{}]/g, '').split(',');
+  fromDriver(value: unknown) {
+    return parseArrayValue(value, String);
   },
 })(name);
 
@@ -266,9 +342,8 @@ export const arrayTime = (name: string) => customType<{
   toDriver(value: string[]) {
     return `{${value.join(',')}}`;
   },
-  fromDriver(value: string) {
-    if (!value || value === '{}') return [];
-    return value.replace(/[{}]/g, '').split(',');
+  fromDriver(value: unknown) {
+    return parseArrayValue(value, String);
   },
 })(name);
 
@@ -289,8 +364,7 @@ export const arrayOf = (arrayType: string, name: string) => customType<{
     }
     return value;
   },
-  fromDriver(value: string) {
-    if (!value || value === '{}') return [];
-    return value.replace(/[{}]/g, '').split(',');
+  fromDriver(value: unknown) {
+    return parseArrayValue(value, v => v);
   },
 })(name);

@@ -92,6 +92,38 @@ export function getLogger(): Logger {
 }
 
 /**
+ * Serialize an Error object to a plain object with all properties
+ */
+function serializeError(err: Error): Record<string, unknown> {
+  const serialized: Record<string, unknown> = {
+    name: err.name,
+    message: err.message,
+    stack: err.stack,
+  };
+  
+  // Copy any additional enumerable and non-enumerable properties
+  for (const key of Object.getOwnPropertyNames(err)) {
+    if (key !== 'name' && key !== 'message' && key !== 'stack') {
+      serialized[key] = (err as unknown as Record<string, unknown>)[key];
+    }
+  }
+  
+  return serialized;
+}
+
+/**
+ * Process arguments for logging, serializing any Error objects
+ */
+function processLogArgs(args: unknown[]): unknown[] {
+  return args.map(arg => {
+    if (arg instanceof Error) {
+      return serializeError(arg);
+    }
+    return arg;
+  });
+}
+
+/**
  * Override console methods to use pino logger
  * This maintains backward compatibility with existing code using console.*
  */
@@ -115,7 +147,7 @@ function overrideConsoleMethods(): void {
       } else if (args.length === 1) {
         logger.debug(args[0] as object);
       } else {
-        logger.debug({ data: args }, String(args[0]));
+        logger.debug({ data: processLogArgs(args) }, String(args[0]));
       }
     }
   };
@@ -127,7 +159,7 @@ function overrideConsoleMethods(): void {
     } else if (args.length === 1) {
       logger.info(args[0] as object);
     } else {
-      logger.info({ data: args }, String(args[0]));
+      logger.info({ data: processLogArgs(args) }, String(args[0]));
     }
   };
 
@@ -138,7 +170,7 @@ function overrideConsoleMethods(): void {
     } else if (args.length === 1) {
       logger.warn(args[0] as object);
     } else {
-      logger.warn({ data: args }, String(args[0]));
+      logger.warn({ data: processLogArgs(args) }, String(args[0]));
     }
   };
 
@@ -147,11 +179,17 @@ function overrideConsoleMethods(): void {
     if (args.length === 1 && typeof args[0] === "string") {
       logger.error(args[0]);
     } else if (args.length === 1 && args[0] instanceof Error) {
-      logger.error(args[0]);
+      logger.error({ err: serializeError(args[0]) }, args[0].message);
     } else if (args.length === 1) {
       logger.error(args[0] as object);
     } else {
-      logger.error({ data: args }, String(args[0]));
+      // Check if any argument is an Error and log it properly
+      const errorArg = args.find(arg => arg instanceof Error) as Error | undefined;
+      if (errorArg) {
+        logger.error({ err: serializeError(errorArg), data: processLogArgs(args) }, String(args[0]));
+      } else {
+        logger.error({ data: processLogArgs(args) }, String(args[0]));
+      }
     }
   };
 
@@ -163,7 +201,7 @@ function overrideConsoleMethods(): void {
       } else if (args.length === 1) {
         logger.debug(args[0] as object);
       } else {
-        logger.debug({ data: args }, String(args[0]));
+        logger.debug({ data: processLogArgs(args) }, String(args[0]));
       }
     }
   };
