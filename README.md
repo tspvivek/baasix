@@ -19,6 +19,12 @@
   <a href="https://github.com/tspvivek/baasix/blob/master/LICENSE.MD"><img src="https://img.shields.io/npm/l/@tspvivek/baasix.svg" alt="license"></a>
 </p>
 
+<p align="center">
+  <a href="#-javascript-sdk">JavaScript SDK</a> •
+  <a href="#-mcp-server-ai-integration">MCP Server</a> •
+  <a href="#-quick-start">Quick Start</a>
+</p>
+
 ---
 
 ## ✨ Features
@@ -36,6 +42,82 @@
 - **🏢 Multi-tenant Architecture** — Host multiple isolated organizations in a single instance
 - **⚡ Real-time Updates** — Socket.IO integration with Redis clustering
 - **🚀 High Performance** — Redis-based caching with configurable TTL
+
+---
+
+## 📦 JavaScript SDK
+
+The official JavaScript/TypeScript SDK for Baasix provides a type-safe, easy-to-use client for web, Node.js, and React Native applications.
+
+👉 **[GitHub: tspvivek/baasix-sdk](https://github.com/tspvivek/baasix-sdk)** | **[npm: @tspvivek/baasix-sdk](https://www.npmjs.com/package/@tspvivek/baasix-sdk)**
+
+### Installation
+
+```bash
+npm install @tspvivek/baasix-sdk
+```
+
+### Quick Example
+
+```typescript
+import { createBaasix } from '@tspvivek/baasix-sdk';
+
+// Create client
+const baasix = createBaasix({
+  url: 'https://your-baasix-instance.com',
+});
+
+// Login
+const { user } = await baasix.auth.login({
+  email: 'user@example.com',
+  password: 'password123',
+});
+
+// Query items with type-safe filters
+const { data: products } = await baasix.items('products').find({
+  filter: { status: { eq: 'active' }, price: { gte: 10 } },
+  sort: { createdAt: 'desc' },
+  limit: 10,
+});
+
+// Create item
+const productId = await baasix.items('products').create({
+  name: 'New Product',
+  price: 29.99,
+});
+
+// Real-time subscriptions
+import { io } from 'socket.io-client';
+baasix.realtime.setSocketClient(io);
+await baasix.realtime.connect();
+
+baasix.realtime.subscribe('products', (payload) => {
+  console.log(`Product ${payload.action}:`, payload.data);
+});
+```
+
+### SDK Features
+
+- 🌐 **Universal** — Works in browsers, Node.js, and React Native
+- 🔐 **Flexible Auth** — JWT tokens, HTTP-only cookies, OAuth (Google, Facebook, Apple, GitHub)
+- 💾 **Customizable Storage** — LocalStorage, AsyncStorage, or custom adapters
+- 📝 **Type-Safe** — Full TypeScript support with generics
+- 📡 **Realtime** — WebSocket subscriptions for live data updates
+- ⚡ **Query Builder** — Fluent API for complex queries with 50+ filter operators
+
+### React Native Setup
+
+```typescript
+import { createBaasix, AsyncStorageAdapter } from '@tspvivek/baasix-sdk';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const baasix = createBaasix({
+  url: 'https://api.example.com',
+  storage: new AsyncStorageAdapter(AsyncStorage),
+});
+```
+
+For complete SDK documentation, see the **[SDK README](https://github.com/tspvivek/baasix-sdk)**.
 
 ---
 
