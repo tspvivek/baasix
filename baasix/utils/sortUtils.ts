@@ -23,9 +23,14 @@ export interface SortOptions {
    */
   item: string | number;
   /**
-   * ID of the target item to move before
+   * ID of the target item to move before/after
    */
   to: string | number;
+  /**
+   * Position mode: 'before' places item before target, 'after' places item after target
+   * @default 'before'
+   */
+  mode?: 'before' | 'after';
   /**
    * Accountability object from request (for permission checks)
    * If not provided, bypassPermissions must be true
@@ -80,7 +85,7 @@ export interface SortResult {
  * ```
  */
 export async function sortItems(options: SortOptions): Promise<SortResult> {
-  const { collection, item, to, accountability, bypassPermissions = false, transaction } = options;
+  const { collection, item, to, accountability, bypassPermissions = false, transaction, mode = 'before' } = options;
   const db = transaction || dbInstance;
 
   // Validate inputs
@@ -170,18 +175,38 @@ export async function sortItems(options: SortOptions): Promise<SortResult> {
 
   // Get the current sort value of the target item
   const targetSort = targetItem[0].sort || 0;
-
-  // Update all items with sort value >= targetSort (increment by 1)
-  await db.execute(sql`
-    UPDATE "${sql.raw(collection)}"
-    SET "sort" = "sort" + 1
-    WHERE "sort" >= ${targetSort}
-  `);
+  
+  // Calculate the new sort value based on mode
+  let newSortValue: number;
+  
+  if (mode === 'after') {
+    // Place after target: newSort = targetSort + 1, shift items >= newSort
+    newSortValue = targetSort + 1;
+    
+    // Update all items with sort value >= newSortValue (increment by 1)
+    await db.execute(sql`
+      UPDATE "${sql.raw(collection)}"
+      SET "sort" = "sort" + 1
+      WHERE "sort" >= ${newSortValue}
+      AND "${sql.raw(primaryKeyField)}" != ${item}
+    `);
+  } else {
+    // Place before target (default): newSort = targetSort, shift items >= targetSort
+    newSortValue = targetSort;
+    
+    // Update all items with sort value >= targetSort (increment by 1)
+    await db.execute(sql`
+      UPDATE "${sql.raw(collection)}"
+      SET "sort" = "sort" + 1
+      WHERE "sort" >= ${targetSort}
+      AND "${sql.raw(primaryKeyField)}" != ${item}
+    `);
+  }
 
   // Update the sort value of the item we're moving
   await db.execute(sql`
     UPDATE "${sql.raw(collection)}"
-    SET "sort" = ${targetSort}
+    SET "sort" = ${newSortValue}
     WHERE "${sql.raw(primaryKeyField)}" = ${item}
   `);
 
@@ -191,7 +216,7 @@ export async function sortItems(options: SortOptions): Promise<SortResult> {
   return {
     item,
     collection,
-    newSort: targetSort,
+    newSort: newSortValue,
   };
 }
 
