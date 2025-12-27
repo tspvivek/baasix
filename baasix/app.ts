@@ -28,13 +28,10 @@ import migrationService from "./services/MigrationService.js";
 import cors from "cors";
 import settingsService from "./services/SettingsService.js";
 import { sql } from "drizzle-orm";
+import { getBaasixPath } from "./utils/dirname.js";
 
-// Get the admin app directory path
-// Uses process.cwd() which works in both ESM and CommonJS environments
-const getAdminAppPath = () => {
-  // In production, the app folder is inside the baasix directory
-  return path.join(process.cwd(), "baasix", "app");
-};
+// Get the admin app directory path (inside the package)
+const getAdminAppPath = () => getBaasixPath("app");
 
 export const app = express();
 

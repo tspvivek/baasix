@@ -2,9 +2,11 @@ import fs from "fs";
 import path from "path";
 import { Express } from "express";
 import type { RouteContext } from '../types/index.js';
+import { getBaasixPath, getProjectPath } from "./dirname.js";
 
 export const loadRoutes = async (app: Express, context: RouteContext): Promise<void> => {
-  const dirPath = path.join(process.cwd(), "extensions");
+  // Extensions are in the user's project directory
+  const dirPath = getProjectPath("extensions");
 
   if (!fs.existsSync(dirPath)) {
     console.warn(`Extensions directory not found: ${dirPath}`);
@@ -36,12 +38,8 @@ export const loadRoutes = async (app: Express, context: RouteContext): Promise<v
 };
 
 export const loadSystemRoutes = async (app: Express, context: RouteContext): Promise<void> => {
-  // Use process.cwd() to find routes - works in both development (baasix/routes) and production (dist/routes)
-  // First try dist/routes (production), then baasix/routes (development)
-  let dirPath = path.join(process.cwd(), "dist", "routes");
-  if (!fs.existsSync(dirPath)) {
-    dirPath = path.join(process.cwd(), "baasix", "routes");
-  }
+  // System routes are inside the package's routes directory
+  const dirPath = getBaasixPath("routes");
 
   if (!fs.existsSync(dirPath)) {
     console.warn(`Routes directory not found: ${dirPath}`);
@@ -50,13 +48,18 @@ export const loadSystemRoutes = async (app: Express, context: RouteContext): Pro
 
   const files = fs.readdirSync(dirPath);
 
+  // Determine if we're in test/dev mode (loading .ts) or production mode (loading .js)
+  const isTestMode = files.some(f => f.endsWith('.ts'));
+  const extension = isTestMode ? '.ts' : '.js';
+
   for (const file of files) {
     const fullPath = path.join(dirPath, file);
-    // Only load .js files (TypeScript compiles .ts to .js)
-    if (fs.lstatSync(fullPath).isFile() && file.endsWith(".js")) {
+    // Load route files based on environment
+    if (fs.lstatSync(fullPath).isFile() && file.endsWith(extension) && file.includes('.route.')) {
       try {
-        // Use relative import path with .js extension
-        const relativePath = `../routes/${file}`;
+        // Use relative import path
+        const fileWithoutExt = file.replace(extension, '');
+        const relativePath = `../routes/${fileWithoutExt}.js`;
         const routeModule = await import(relativePath);
 
         if (routeModule && typeof routeModule.default === "object") {

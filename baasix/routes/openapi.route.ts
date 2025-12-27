@@ -5,6 +5,7 @@ import path from "path";
 import { schemaManager } from "../utils/schemaManager.js";
 import { APIError } from "../utils/errorHandler.js";
 import settingsService from "../services/SettingsService.js";
+import { getProjectPath } from "../utils/dirname.js";
 
 const registerEndpoint = (app: Express) => {
     // OpenAPI specification endpoint
@@ -185,7 +186,7 @@ function getSystemEndpoints(): EndpointInfo[] {
 
 function getExtensionEndpoints(): EndpointInfo[] {
     const extensionEndpoints: EndpointInfo[] = [];
-    const extensionsPath = path.join(process.cwd(), "extensions");
+    const extensionsPath = getProjectPath("extensions");
 
     if (!fs.existsSync(extensionsPath)) {
         return extensionEndpoints;

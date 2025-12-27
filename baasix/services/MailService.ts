@@ -5,11 +5,7 @@ import fs from "fs";
 import path from "path";
 import settingsService from "./SettingsService.js";
 import type { MailOptions, SenderConfig, TenantTransporter } from '../types/index.js';
-
-// In test environment, use Jest globals, in production use process.cwd() fallback
-const _dirname = typeof __dirname !== 'undefined'
-  ? __dirname
-  : process.cwd() + '/baasix/services';
+import { getBaasixPath, getProjectPath } from "../utils/dirname.js";
 
 class MailService {
   private senders: Record<string, SenderConfig> = {};
@@ -26,10 +22,12 @@ class MailService {
 
   constructor() {
     this.engine = new Liquid();
-    this.defaultTemplatePath = path.join(_dirname, "../templates/mails/default.liquid");
-    this.customTemplatesPath = path.join(process.cwd(), "extensions/baasix-templates/mails");
-    this.defaultLogoPath = path.join(_dirname, "../templates/logo/logo.png");
-    this.customLogoPath = path.join(process.cwd(), "extensions/baasix-templates/logo/logo.png");
+    // Default templates bundled with package
+    this.defaultTemplatePath = getBaasixPath("templates/mails/default.liquid");
+    this.defaultLogoPath = getBaasixPath("templates/logo/logo.png");
+    // Custom templates in user's project directory
+    this.customTemplatesPath = getProjectPath("extensions/baasix-templates/mails");
+    this.customLogoPath = getProjectPath("extensions/baasix-templates/logo/logo.png");
     // Note: initialize() is now called explicitly from app.ts, not in constructor
   }
 

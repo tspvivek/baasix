@@ -9,6 +9,7 @@ import statsService from "./StatsService.js";
 import schedule from "node-schedule";
 import { eq } from "drizzle-orm";
 import { schemaManager } from "../utils/schemaManager.js";
+import { getProjectPath } from "../utils/dirname.js";
 
 /**
  * WorkflowService - Comprehensive workflow execution engine
@@ -1856,7 +1857,7 @@ class WorkflowService {
 
         // Create require function for ES module compatibility
         // Use a file path that works in both Jest and production
-        const require = createRequire(process.cwd() + '/package.json');
+        const require = createRequire(getProjectPath('package.json'));
 
         // Import commonly used libraries
         const lodash = require("lodash");

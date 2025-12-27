@@ -6,6 +6,7 @@ import crypto from "crypto";
 import FilesService from "./FilesService.js";
 import ItemsService from "./ItemsService.js";
 import type { AssetQuery, AssetResult, ProcessedImage } from '../types/index.js';
+import { getProjectPath } from "../utils/dirname.js";
 
 class AssetsService extends FilesService {
   private cacheDir: string;
@@ -16,7 +17,7 @@ class AssetsService extends FilesService {
     const { accountability } = params;
     super({ accountability });
     
-    this.cacheDir = env.get("ASSET_CACHE_DIR") || path.join(process.cwd(), "asset-cache");
+    this.cacheDir = env.get("ASSET_CACHE_DIR") || getProjectPath("asset-cache");
     if (!fs.existsSync(this.cacheDir)) {
       fs.mkdirSync(this.cacheDir, { recursive: true });
     }

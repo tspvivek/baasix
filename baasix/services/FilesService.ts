@@ -3,6 +3,7 @@ import { promises as fs, createWriteStream } from "fs";
 import path from "path";
 import os from "os";
 import crypto from "crypto";
+import { getProjectPath } from "../utils/dirname.js";
 import sharp from "sharp";
 // @ts-ignore - No type definitions available
 import ffprobe from "ffprobe";
@@ -279,7 +280,7 @@ class FilesService {
 
   async uploadFromUrl(fileUrl: string, metadata: FileMetadata = {}): Promise<string | number> {
     const fileName = fileUrl.split("/").pop() || "download";
-    const tempPath = path.resolve(process.cwd() + "/" + env.get("STORAGE_TEMP_PATH"), `temp-${fileName}`);
+    const tempPath = getProjectPath(env.get("STORAGE_TEMP_PATH") || "temp", `temp-${fileName}`);
 
     try {
       await fs.mkdir(path.dirname(tempPath), { recursive: true });

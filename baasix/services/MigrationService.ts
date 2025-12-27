@@ -5,11 +5,7 @@ import path from "path";
 import fs from "fs/promises";
 import crypto from "crypto";
 import env from "../utils/env.js";
-
-// In test environment (Jest/CommonJS), use Jest globals, in production (ESM) use process.cwd() fallback
-const _dirname = typeof __dirname !== 'undefined'
-  ? __dirname
-  : process.cwd() + '/baasix/services';
+import { getBaasixPath, getProjectPath } from "../utils/dirname.js";
 
 /**
  * Migration status enum
@@ -110,10 +106,10 @@ class MigrationService {
   private isUpgradeFromSequelize: boolean = false;
 
   constructor() {
-    // Default migrations directory - can be overridden via env
-    this.migrationsDir = env.get("MIGRATIONS_DIR") || path.join(process.cwd(), "migrations");
-    // System migrations directory inside baasix
-    this.systemMigrationsDir = path.join(_dirname, "..", "migrations");
+    // User migrations directory - in user's project
+    this.migrationsDir = env.get("MIGRATIONS_DIR") || getProjectPath("migrations");
+    // System migrations directory - bundled with package
+    this.systemMigrationsDir = getBaasixPath("migrations");
   }
 
   /**
@@ -1138,13 +1134,13 @@ export default { version, name, description, type, up, down };
    */
   async getCurrentBaasixVersion(): Promise<string> {
     try {
-      const packagePath = path.join(process.cwd(), "node_modules", "@tspvivek", "baasix", "package.json");
+      const packagePath = getProjectPath("node_modules", "@tspvivek", "baasix", "package.json");
       const packageJson = JSON.parse(await fs.readFile(packagePath, "utf-8"));
       return packageJson.version;
     } catch {
       // Try direct package.json if running from source
       try {
-        const packagePath = path.join(_dirname, "..", "..", "package.json");
+        const packagePath = getBaasixPath("package.json");
         const packageJson = JSON.parse(await fs.readFile(packagePath, "utf-8"));
         return packageJson.version;
       } catch {

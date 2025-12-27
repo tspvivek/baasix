@@ -4,6 +4,7 @@ import { db, getDatabase } from '../utils/db.js';
 import { sql } from 'drizzle-orm';
 import { schemaManager } from '../utils/schemaManager.js';
 import type { HookContext, HookFunction } from '../types/index.js';
+import { getProjectPath } from '../utils/dirname.js';
 
 // Re-export types for backward compatibility
 export type { HookContext, HookFunction };
@@ -154,7 +155,7 @@ export class HooksManager {
    */
   async loadHooksFromDirectory(context: any, directory?: string): Promise<void> {
     if (!directory) {
-      directory = path.join(process.cwd(), 'extensions');
+      directory = getProjectPath('extensions');
     }
 
     if (!fs.existsSync(directory)) {
@@ -192,7 +193,7 @@ export class HooksManager {
    */
   async loadSchedulesFromDirectory(context: any, schedule: any, directory?: string): Promise<void> {
     if (!directory) {
-      directory = path.join(process.cwd(), 'extensions');
+      directory = getProjectPath('extensions');
     }
 
     if (!fs.existsSync(directory)) {

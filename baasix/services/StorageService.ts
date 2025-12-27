@@ -5,6 +5,7 @@ import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } fro
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { existsSync, mkdirSync } from "fs";
 import type { StorageProvider } from '../types/index.js';
+import { getProjectPath } from "../utils/dirname.js";
 
 class StorageService {
   private providers: Record<string, StorageProvider> = {};
@@ -57,7 +58,7 @@ class StorageService {
       mkdirSync(storagePath, { recursive: true });
     }
 
-    const basePath = path.resolve(process.cwd(), storagePath);
+    const basePath = path.resolve(getProjectPath(storagePath));
 
     this.providers[service] = {
       driver: "LOCAL",
