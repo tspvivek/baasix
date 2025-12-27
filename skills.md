@@ -1062,6 +1062,94 @@ describe("Products API", () => {
 
 ---
 
+## CLI (Command Line Interface)
+
+Baasix provides a CLI tool (`@tspvivek/baasix-cli`) for project scaffolding, type generation, and migrations.
+
+### Installation
+
+```bash
+# Global installation
+npm install -g @tspvivek/baasix-cli
+
+# Or use npx
+npx @tspvivek/baasix-cli <command>
+```
+
+### Configuration
+
+Create a `.env` file with:
+
+```env
+BAASIX_URL=http://localhost:8056
+BAASIX_EMAIL=admin@example.com
+BAASIX_PASSWORD=your-password
+# Or: BAASIX_TOKEN=your-jwt-token
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `baasix init [name]` | Initialize new project (-t api/nextjs) |
+| `baasix generate` | Generate TypeScript types (-t types/sdk-types/schema-json) |
+| `baasix extension [name]` | Scaffold extension (-t endpoint/hook) |
+| `baasix migrate [action]` | Migration management (status/list/run/create/rollback/reset) |
+
+### Quick Examples
+
+```bash
+# Create new API project
+baasix init my-api -t api
+
+# Generate TypeScript types
+baasix generate -t types -o types/baasix.d.ts
+
+# Create hook extension
+baasix extension audit-log -t hook
+
+# Create and run migrations
+baasix migrate create -n add_products_table
+baasix migrate run
+baasix migrate rollback --steps 1
+```
+
+### Generated Types Usage
+
+```typescript
+import type { Products, Users } from "./types/baasix";
+import { createBaasix } from "@tspvivek/baasix-sdk";
+
+const baasix = createBaasix({ url: "http://localhost:8056" });
+
+// Type-safe queries
+const products = await baasix.items<Products>("products").list();
+const user = await baasix.items<Users>("users").get("user-id");
+```
+
+### Migration File Structure
+
+```javascript
+// migrations/20240115120000_create_products_table.js
+export async function up(baasix) {
+  await baasix.schema.create("products", {
+    name: "Products",
+    timestamps: true,
+    fields: {
+      id: { type: "UUID", primaryKey: true, defaultValue: { type: "UUIDV4" } },
+      name: { type: "String", allowNull: false, values: { length: 255 } },
+      price: { type: "Decimal", values: { precision: 10, scale: 2 } },
+    },
+  });
+}
+
+export async function down(baasix) {
+  await baasix.schema.delete("products");
+}
+```
+
+---
+
 ## Version
 
 - Package: @tspvivek/baasix@0.1.0-alpha.2

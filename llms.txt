@@ -1457,6 +1457,221 @@ describe("Posts API", () => {
 
 ---
 
+# SECTION 14: CLI (COMMAND LINE INTERFACE)
+
+## Installation
+
+```bash
+# Global installation
+npm install -g @tspvivek/baasix-cli
+
+# Or use npx
+npx @tspvivek/baasix-cli <command>
+```
+
+## CLI Configuration
+
+The CLI reads configuration from environment variables or a `.env` file:
+
+```env
+# Required
+BAASIX_URL=http://localhost:8056
+
+# Authentication (optional, for protected operations)
+BAASIX_EMAIL=admin@example.com
+BAASIX_PASSWORD=your-password
+
+# Or use token auth
+BAASIX_TOKEN=your-jwt-token
+```
+
+## Commands Reference
+
+### `baasix init`
+
+Initialize a new Baasix project with scaffolding.
+
+```bash
+baasix init [project-name]
+```
+
+| Option | Description |
+|--------|-------------|
+| -t, --template <template> | Project template (api, nextjs) |
+| --skip-install | Skip package installation |
+
+**Templates:**
+- **api** - Baasix backend API project
+- **nextjs** - Next.js frontend with Baasix SDK integration
+
+### `baasix generate`
+
+Generate TypeScript types from your Baasix schemas.
+
+```bash
+baasix generate
+baasix gen
+```
+
+| Option | Description |
+|--------|-------------|
+| -o, --output <path> | Output file path (default: `baasix.d.ts`) |
+| -t, --target <target> | Generation target: `types`, `sdk-types`, `schema-json` |
+| --url <url> | Baasix server URL |
+| -y, --yes | Skip confirmation prompts |
+
+**Generated Output Example:**
+
+```typescript
+// Generated types
+export interface Products {
+  id: string;
+  name: string;
+  price: number;
+  description?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface Users {
+  id: string;
+  email: string;
+  firstName?: string | null;
+  lastName?: string | null;
+}
+
+// Collection type map
+export type CollectionName = "products" | "users";
+```
+
+### `baasix extension`
+
+Scaffold a new Baasix extension.
+
+```bash
+baasix extension [name]
+```
+
+| Option | Description |
+|--------|-------------|
+| -t, --type <type> | Extension type: `endpoint`, `hook` |
+
+### `baasix migrate`
+
+Database migration management.
+
+```bash
+baasix migrate [action]
+```
+
+**Actions:**
+
+| Action | Description |
+|--------|-------------|
+| status | Show current migration status |
+| list | List all migrations |
+| run | Run pending migrations |
+| create | Create a new migration file |
+| rollback | Rollback the last batch of migrations |
+| reset | Rollback all migrations (dangerous!) |
+
+| Option | Description |
+|--------|-------------|
+| --url <url> | Baasix server URL |
+| -n, --name <name> | Migration name (for create) |
+| -s, --steps <number> | Number of batches to rollback |
+| -y, --yes | Skip confirmation prompts |
+
+**Migration File Example:**
+
+```javascript
+// migrations/20240115120000_create_products_table.js
+export async function up(baasix) {
+  await baasix.schema.create("products", {
+    name: "Products",
+    timestamps: true,
+    fields: {
+      id: { type: "UUID", primaryKey: true, defaultValue: { type: "UUIDV4" } },
+      name: { type: "String", allowNull: false, values: { length: 255 } },
+      price: { type: "Decimal", values: { precision: 10, scale: 2 } },
+      description: { type: "Text" },
+    },
+  });
+}
+
+export async function down(baasix) {
+  await baasix.schema.delete("products");
+}
+```
+
+## CLI Usage Examples
+
+```bash
+# Initialize new API project
+baasix init my-api -t api
+
+# Initialize Next.js project
+baasix init my-app -t nextjs
+
+# Generate TypeScript types
+baasix generate -t types -o types/baasix.d.ts
+
+# Create endpoint extension
+baasix extension my-api -t endpoint
+
+# Create hook extension
+baasix extension audit-log -t hook
+
+# Create migration
+baasix migrate create -n add_categories_table
+
+# Check migration status
+baasix migrate status
+
+# Run pending migrations
+baasix migrate run
+
+# Rollback last migration batch
+baasix migrate rollback --steps 1
+```
+
+## Project Structure After Init
+
+### API Template
+
+```
+my-project/
+├── .env
+├── package.json
+├── server.js
+├── extensions/
+│   └── .gitkeep
+├── migrations/
+│   └── .gitkeep
+└── uploads/
+    └── .gitkeep
+```
+
+### Next.js Template
+
+```
+my-project/
+├── .env.local
+├── package.json
+├── next.config.mjs
+├── tailwind.config.ts
+├── tsconfig.json
+├── src/
+│   ├── app/
+│   │   ├── layout.tsx
+│   │   └── page.tsx
+│   └── lib/
+│       └── baasix.ts
+└── public/
+```
+
+---
+
 # QUICK REFERENCE CARD
 
 ## Common Queries
