@@ -642,6 +642,7 @@ POST /schemas
 | DateTime | TIMESTAMP | Date and time |
 | Time | TIME | Time only |
 | UUID | UUID | UUID v4 |
+| SUID | VARCHAR(21) | Short unique ID (compact, URL-safe) |
 | JSON | JSON | JSON (not queryable) |
 | JSONB | JSONB | Binary JSON (queryable, indexed) |
 | Array | type[] | PostgreSQL array |
@@ -667,13 +668,43 @@ POST /schemas
 
 ```javascript
 {"type": "UUIDV4"}         // Generate UUID v4
+{"type": "SUID"}           // Generate short unique ID (compact, URL-safe)
 {"type": "NOW"}            // Current timestamp
 {"type": "AUTOINCREMENT"}  // Auto-incrementing integer
+{"type": "SQL", "value": "(SELECT ...)"} // Custom SQL expression
 "static value"             // Literal value
 0                          // Numeric default
 false                      // Boolean default
 []                         // Empty array
 {}                         // Empty object
+```
+
+### SQL Default Value Examples
+
+```javascript
+// Next sort order
+{
+  "sortOrder": {
+    "type": "Integer",
+    "defaultValue": {"type": "SQL", "value": "(SELECT COALESCE(MAX(sort_order), 0) + 1 FROM products)"}
+  }
+}
+
+// Random code
+{
+  "code": {
+    "type": "String",
+    "defaultValue": {"type": "SQL", "value": "md5(random()::text)"}
+  }
+}
+
+// Current fiscal year
+{
+  "fiscalYear": {
+    "type": "Integer",
+    "defaultValue": {"type": "SQL", "value": "EXTRACT(YEAR FROM CURRENT_DATE)"}
+  }
+}
 ```
 
 ## Field Validation Rules
