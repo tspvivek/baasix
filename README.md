@@ -21,6 +21,7 @@
 
 <p align="center">
   <a href="#-javascript-sdk">JavaScript SDK</a> •
+  <a href="#-cli-command-line-interface">CLI</a> •
   <a href="#-mcp-server-ai-integration">MCP Server</a> •
   <a href="#-quick-start">Quick Start</a>
 </p>
@@ -32,6 +33,7 @@
 - **🗄️ Dynamic Database Management** — Create and modify data models on the fly with a flexible schema system
 - **🔍 Powerful Query API** — Complex filtering, sorting, pagination, aggregation, and full-text search
 - **🔐 Authentication & Authorization** — JWT, cookie-based auth, SSO providers, and role-based permissions
+- **✅ Schema Validations** — Built-in field validation with min/max, patterns, required, unique, and custom rules
 - **⚡ Workflow Automation** — Visual workflow builder with 17 node types and real-time monitoring
 - **🔔 Notification System** — Built-in user notifications with real-time delivery via Socket.IO
 - **📁 File Storage & Processing** — Upload, manage, and transform files with image optimization
@@ -42,6 +44,7 @@
 - **🏢 Multi-tenant Architecture** — Host multiple isolated organizations in a single instance
 - **⚡ Real-time Updates** — Socket.IO integration with Redis clustering
 - **🚀 High Performance** — Redis-based caching with configurable TTL
+- **🖥️ CLI Tools** — Project scaffolding, TypeScript type generation, and migration management
 
 ---
 
@@ -118,6 +121,75 @@ const baasix = createBaasix({
 ```
 
 For complete SDK documentation, see the **[SDK README](https://github.com/tspvivek/baasix-sdk)**.
+
+---
+
+## 🖥️ CLI (Command-Line Interface)
+
+The official CLI for Baasix provides project scaffolding, TypeScript type generation, extension creation, and migration management.
+
+👉 **[npm: @tspvivek/baasix-cli](https://www.npmjs.com/package/@tspvivek/baasix-cli)**
+
+### Installation
+
+```bash
+# Global installation
+npm install -g @tspvivek/baasix-cli
+
+# Or use with npx
+npx @tspvivek/baasix-cli <command>
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `baasix init` | Create a new project with interactive configuration |
+| `baasix generate` | Generate TypeScript types from your schemas |
+| `baasix extension` | Scaffold a new hook, endpoint, or schedule |
+| `baasix migrate` | Run database migrations |
+
+### Quick Start with CLI
+
+```bash
+# Create a new project
+npx @tspvivek/baasix-cli init
+
+# Interactive prompts will guide you through:
+# - Project name and template (API, Next.js App Router, Next.js Pages)
+# - Database URL
+# - Multi-tenancy, WebSocket, Storage options
+# - Authentication providers (Google, GitHub, etc.)
+# - Cache adapter (Memory, Redis)
+```
+
+### Generate TypeScript Types
+
+```bash
+# Generate types from running Baasix instance
+baasix generate --url http://localhost:8056 --output ./src/types/baasix.d.ts
+
+# Use generated types with SDK
+import type { BaasixCollections, Product } from './types/baasix';
+
+const baasix = createBaasix<BaasixCollections>({ url: 'http://localhost:8056' });
+const { data } = await baasix.items('products').find(); // Fully typed!
+```
+
+### Create Extensions
+
+```bash
+# Create a new hook extension
+baasix extension --type hook --name order-notifications
+
+# Create a new endpoint extension  
+baasix extension --type endpoint --name analytics
+
+# Create a scheduled task
+baasix extension --type schedule --name daily-cleanup
+```
+
+For complete CLI documentation, see **[baasix.com/docs/cli-guide](https://baasix.com/docs/cli-guide)**.
 
 ---
 

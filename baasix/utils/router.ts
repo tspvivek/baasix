@@ -49,13 +49,17 @@ export const loadSystemRoutes = async (app: Express, context: RouteContext): Pro
   const files = fs.readdirSync(dirPath);
 
   // Determine if we're in test/dev mode (loading .ts) or production mode (loading .js)
-  const isTestMode = files.some(f => f.endsWith('.ts'));
+  // Check for .ts files that are NOT .d.ts (declaration) files
+  const isTestMode = files.some(f => f.endsWith('.ts') && !f.endsWith('.d.ts'));
   const extension = isTestMode ? '.ts' : '.js';
 
   for (const file of files) {
     const fullPath = path.join(dirPath, file);
-    // Load route files based on environment
-    if (fs.lstatSync(fullPath).isFile() && file.endsWith(extension) && file.includes('.route.')) {
+    // Load route files based on environment - skip .d.ts files
+    if (fs.lstatSync(fullPath).isFile() && 
+        file.endsWith(extension) && 
+        file.includes('.route.') && 
+        !file.endsWith('.d.ts')) {
       try {
         // Use relative import path
         const fileWithoutExt = file.replace(extension, '');

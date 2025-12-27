@@ -10,6 +10,35 @@ export const isCommonJS = typeof __dirname !== 'undefined';
 let cachedBaasixRoot: string | null = null;
 
 /**
+ * Get the current file's directory using error stack trace
+ * This works in both ESM and CommonJS environments
+ */
+function getCurrentFilePath(): string | undefined {
+  const originalPrepareStackTrace = Error.prepareStackTrace;
+  try {
+    const err = new Error();
+    Error.prepareStackTrace = (_, stack) => stack;
+    const stack = err.stack as unknown as NodeJS.CallSite[];
+    Error.prepareStackTrace = originalPrepareStackTrace;
+    
+    // Find the first stack frame that's in this file (dirname.js or dirname.ts)
+    for (const frame of stack) {
+      const filename = frame.getFileName();
+      if (filename && (filename.includes('dirname.js') || filename.includes('dirname.ts'))) {
+        // Handle file:// URLs
+        if (filename.startsWith('file://')) {
+          return fileURLToPath(filename);
+        }
+        return filename;
+      }
+    }
+  } catch {
+    // Fallback if stack trace approach fails
+  }
+  return undefined;
+}
+
+/**
  * Get the baasix package root directory
  * Works in both ESM (production) and CommonJS (Jest) environments
  */
@@ -25,20 +54,17 @@ export function getBaasixRoot(): string {
     return cachedBaasixRoot;
   }
   
-  // In ESM, we need to use import.meta.url
-  // Use Function constructor to avoid syntax error during CommonJS parsing
-  // This code path only runs in ESM mode where import.meta is available
-  try {
-    const getImportMetaUrl = new Function('return import.meta.url');
-    const importMetaUrl = getImportMetaUrl();
-    const currentDir = path.dirname(fileURLToPath(importMetaUrl));
+  // In ESM, use stack trace to get current file path
+  const currentFilePath = getCurrentFilePath();
+  if (currentFilePath) {
+    const currentDir = path.dirname(currentFilePath);
     cachedBaasixRoot = path.resolve(currentDir, '..');
     return cachedBaasixRoot;
-  } catch {
-    // Fallback if Function constructor doesn't work
-    cachedBaasixRoot = path.join(process.cwd(), 'baasix');
-    return cachedBaasixRoot;
   }
+  
+  // Fallback (should not reach here in normal circumstances)
+  cachedBaasixRoot = path.join(process.cwd(), 'baasix');
+  return cachedBaasixRoot;
 }
 
 /**
