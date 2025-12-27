@@ -676,6 +676,94 @@ false                      // Boolean default
 {}                         // Empty object
 ```
 
+## Field Validation Rules
+
+Baasix enforces validation rules at runtime during create and update operations.
+
+### Numeric Validation (Integer, BigInt, Decimal, Double, Float, Real)
+
+```javascript
+{
+  "age": {
+    "type": "Integer",
+    "validate": {
+      "min": 0,          // Minimum allowed value
+      "max": 150,        // Maximum allowed value
+      "isInt": true      // Must be integer (for Double/Decimal)
+    }
+  },
+  "price": {
+    "type": "Decimal",
+    "values": {"precision": 10, "scale": 2},
+    "validate": {
+      "min": 0.01,
+      "max": 99999.99
+    }
+  }
+}
+```
+
+### Array Validation (Array_Integer, Array_Double, etc.)
+
+Validation rules apply to each element in the array:
+
+```javascript
+{
+  "scores": {
+    "type": "Array_Integer",
+    "validate": {
+      "min": 0,    // Each element must be >= 0
+      "max": 100   // Each element must be <= 100
+    }
+  }
+}
+```
+
+### Range Validation (Range_Integer, Range_Double, Range_Decimal)
+
+Validation rules apply to both lower and upper bounds:
+
+```javascript
+{
+  "age_range": {
+    "type": "Range_Integer",
+    "validate": {
+      "min": 0,    // Lower/upper bounds must be >= 0
+      "max": 200   // Lower/upper bounds must be <= 200
+    }
+  }
+}
+```
+
+Note: Range validation also ensures lower bound <= upper bound.
+
+### String Validation
+
+```javascript
+{
+  "email": {
+    "type": "String",
+    "validate": {
+      "isEmail": true,      // Must be valid email format
+      "notEmpty": true,     // Cannot be empty string
+      "len": [5, 255]       // Length between 5-255 characters
+    }
+  },
+  "website": {
+    "type": "String",
+    "validate": {
+      "isUrl": true         // Must be valid URL format
+    }
+  },
+  "zipCode": {
+    "type": "String",
+    "validate": {
+      "is": "^\\d{5}(-\\d{4})?$"  // Regex pattern matching
+    }
+  }
+}
+```
+
 ## Field Definition Examples
 
 ```javascript

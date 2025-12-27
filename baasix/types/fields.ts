@@ -32,6 +32,21 @@ export interface FlattenedField {
 }
 
 /**
+ * Field validation rules interface
+ */
+export interface FieldValidationRules {
+  min?: number;
+  max?: number;
+  isInt?: boolean;
+  isEmail?: boolean;
+  isUrl?: boolean;
+  notEmpty?: boolean;
+  len?: [number, number];
+  is?: string; // regex pattern
+  matches?: string; // alias for is
+}
+
+/**
  * Field schema interface
  */
 export interface FieldSchema {
@@ -55,4 +70,5 @@ export interface FieldSchema {
   otherKey?: string;
   polymorphic?: boolean;
   tables?: string[];
+  validate?: FieldValidationRules;
 }

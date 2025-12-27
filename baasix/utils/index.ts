@@ -66,6 +66,9 @@ export { default as importUtils } from './importUtils.js';
 // Schema Validation (HIGH PRIORITY - comprehensive schema validation)
 export { default as schemaValidator } from './schemaValidator.js';
 
+// Value Validation (Runtime validation for field values)
+export { default as valueValidator } from './valueValidator.js';
+
 // Cache Service (Drizzle native caching with multiple adapters)
 export {
   initializeCacheService,

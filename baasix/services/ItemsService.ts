@@ -35,6 +35,7 @@ import {
 } from '../utils/relationUtils.js';
 import { resolveRelationPath } from '../utils/relationPathResolver.js';
 import fieldUtils from '../utils/fieldUtils.js';
+import valueValidator from '../utils/valueValidator.js';
 import type {
   ProcessedInclude,
   IncludeConfig,
@@ -1814,6 +1815,9 @@ export class ItemsService {
     // Validate relational data
     await validateRelationalData(modifiedData, this.collection, this);
 
+    // Validate field values against schema validation rules (min, max, etc.)
+    await valueValidator.validateOrThrow(this.collection, modifiedData, false);
+
     // Handle circular dependencies
     const { resolvedData, deferredFields } = await resolveCircularDependencies(
       modifiedData,
@@ -2090,6 +2094,9 @@ export class ItemsService {
 
     // Validate and enforce tenant context
     modifiedData = await this.validateAndEnforceTenantContext(modifiedData);
+
+    // Validate field values against schema validation rules (min, max, etc.)
+    await valueValidator.validateOrThrow(this.collection, modifiedData, true);
 
     // Filter out VIRTUAL (generated) fields
     let schemaDefinition = await schemaManager.getSchemaDefinition(this.collection);

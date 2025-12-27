@@ -908,8 +908,18 @@ export class SchemaManager {
           case 'UUIDV4':
             parts.push('DEFAULT gen_random_uuid()');
             break;
+          case 'SUID':
+            // Short unique ID - uses gen_random_uuid() for now
+            parts.push('DEFAULT gen_random_uuid()');
+            break;
           case 'NOW':
             parts.push('DEFAULT NOW()');
+            break;
+          case 'SQL':
+            // Raw SQL default expression
+            if (fieldSchema.defaultValue.value) {
+              parts.push(`DEFAULT ${fieldSchema.defaultValue.value}`);
+            }
             break;
         }
       } else if (typeof fieldSchema.defaultValue === 'string') {
