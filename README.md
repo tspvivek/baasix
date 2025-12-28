@@ -128,7 +128,7 @@ For complete SDK documentation, see the **[SDK README](https://github.com/tspviv
 
 The official CLI for Baasix provides project scaffolding, TypeScript type generation, extension creation, and migration management.
 
-👉 **[npm: @tspvivek/baasix-cli](https://www.npmjs.com/package/@tspvivek/baasix-cli)**
+👉 **[GitHub: tspvivek/baasix-cli](https://github.com/tspvivek/baasix-cli)** | **[npm: @tspvivek/baasix-cli](https://www.npmjs.com/package/@tspvivek/baasix-cli)**
 
 ### Installation
 
@@ -146,47 +146,79 @@ npx @tspvivek/baasix-cli <command>
 |---------|-------------|
 | `baasix init` | Create a new project with interactive configuration |
 | `baasix generate` | Generate TypeScript types from your schemas |
-| `baasix extension` | Scaffold a new hook, endpoint, or schedule |
+| `baasix extension` | Scaffold a new hook or endpoint extension |
 | `baasix migrate` | Run database migrations |
 
 ### Quick Start with CLI
 
 ```bash
-# Create a new project
+# Create a new API project
+npx @tspvivek/baasix-cli init --template api my-api
+
+# Or with interactive prompts for full configuration
 npx @tspvivek/baasix-cli init
 
-# Interactive prompts will guide you through:
-# - Project name and template (API, Next.js App Router, Next.js Pages)
-# - Database URL
-# - Multi-tenancy, WebSocket, Storage options
-# - Authentication providers (Google, GitHub, etc.)
-# - Cache adapter (Memory, Redis)
+# Skip all prompts with sensible defaults
+npx @tspvivek/baasix-cli init --template api -y
 ```
 
+### Project Templates
+
+| Template | Description |
+|----------|-------------|
+| `api` | Standalone Baasix API server |
+| `nextjs-app` | Next.js 14+ frontend (App Router) with SDK |
+| `nextjs` | Next.js frontend (Pages Router) with SDK |
+
+> **Note:** Next.js templates create **frontend-only** projects that connect to a separate Baasix API.
+
 ### Generate TypeScript Types
+
+The CLI generates fully-typed interfaces with proper relation types and enum support:
 
 ```bash
 # Generate types from running Baasix instance
 baasix generate --url http://localhost:8056 --output ./src/types/baasix.d.ts
+```
 
-# Use generated types with SDK
-import type { BaasixCollections, Product } from './types/baasix';
+**Generated types include:**
+- ✅ **Relations** typed as target collection types (not `unknown`)
+- ✅ **Enums** as union types (`'published' | 'draft' | 'archived'`)
+- ✅ **System collections** (`BaasixUser`, `BaasixRole`, `BaasixFile`)
+- ✅ **Validation JSDoc** comments (`@min`, `@max`, `@length`)
 
-const baasix = createBaasix<BaasixCollections>({ url: 'http://localhost:8056' });
-const { data } = await baasix.items('products').find(); // Fully typed!
+```typescript
+// Example generated types
+export interface Product {
+  id: string;
+  name: string;
+  status: 'published' | 'draft' | 'archived';  // Enum as union
+  category?: Category | null;                   // Relation typed correctly
+  userCreated?: BaasixUser | null;             // System relation
+}
 ```
 
 ### Create Extensions
 
 ```bash
 # Create a new hook extension
-baasix extension --type hook --name order-notifications
+baasix extension --type hook --name order-notifications --collection orders
 
 # Create a new endpoint extension  
 baasix extension --type endpoint --name analytics
+```
 
-# Create a scheduled task
-baasix extension --type schedule --name daily-cleanup
+### Manage Migrations
+
+```bash
+# Create a migration
+baasix migrate create --name add-products-table
+
+# Check status
+baasix migrate status --url http://localhost:8056
+
+# Run pending migrations
+baasix migrate run --url http://localhost:8056
 ```
 
 For complete CLI documentation, see **[baasix.com/docs/cli-guide](https://baasix.com/docs/cli-guide)**.
