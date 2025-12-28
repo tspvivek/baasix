@@ -1064,16 +1064,16 @@ describe("Products API", () => {
 
 ## CLI (Command Line Interface)
 
-Baasix provides a CLI tool (`@tspvivek/baasix-cli`) for project scaffolding, type generation, and migrations.
+Baasix provides a CLI tool (`baasix`) for project scaffolding, type generation, and migrations.
 
 ### Installation
 
 ```bash
 # Global installation
-npm install -g @tspvivek/baasix-cli
+npm install -g baasix
 
 # Or use npx
-npx @tspvivek/baasix-cli <command>
+npx baasix <command>
 ```
 
 ### Configuration

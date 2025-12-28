@@ -128,16 +128,16 @@ For complete SDK documentation, see the **[SDK README](https://github.com/tspviv
 
 The official CLI for Baasix provides project scaffolding, TypeScript type generation, extension creation, and migration management.
 
-👉 **[GitHub: tspvivek/baasix-cli](https://github.com/tspvivek/baasix-cli)** | **[npm: @tspvivek/baasix-cli](https://www.npmjs.com/package/@tspvivek/baasix-cli)**
+👉 **[npm: baasix](https://www.npmjs.com/package/baasix)**
 
 ### Installation
 
 ```bash
 # Global installation
-npm install -g @tspvivek/baasix-cli
+npm install -g baasix
 
 # Or use with npx
-npx @tspvivek/baasix-cli <command>
+npx baasix <command>
 ```
 
 ### Commands
@@ -153,13 +153,13 @@ npx @tspvivek/baasix-cli <command>
 
 ```bash
 # Create a new API project
-npx @tspvivek/baasix-cli init --template api my-api
+npx baasix init --template api my-api
 
 # Or with interactive prompts for full configuration
-npx @tspvivek/baasix-cli init
+npx baasix init
 
 # Skip all prompts with sensible defaults
-npx @tspvivek/baasix-cli init --template api -y
+npx baasix init --template api -y
 ```
 
 ### Project Templates

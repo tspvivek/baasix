@@ -1463,10 +1463,10 @@ describe("Posts API", () => {
 
 ```bash
 # Global installation
-npm install -g @tspvivek/baasix-cli
+npm install -g baasix
 
 # Or use npx
-npx @tspvivek/baasix-cli <command>
+npx baasix <command>
 ```
 
 ## CLI Configuration
