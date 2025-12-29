@@ -1692,6 +1692,80 @@ export const systemSchemas = {
                 ],
             },
         },
+        {
+            collectionName: "baasix_Template",
+            schema: {
+                name: "Template",
+                timestamps: true,
+                fields: {
+                    id: {
+                        type: "UUID",
+                        primaryKey: true,
+                        defaultValue: { type: "UUIDV4" },
+                        SystemGenerated: "true",
+                    },
+                    type: {
+                        type: "String",
+                        allowNull: false,
+                        SystemGenerated: "true",
+                        description: "The type of email template (e.g., inviteNewUser, passwordReset, or custom types)",
+                    },
+                    subject: {
+                        type: "String",
+                        allowNull: false,
+                        SystemGenerated: "true",
+                        description: "Email subject line (supports Liquid templating)",
+                    },
+                    body: {
+                        type: "HTML",
+                        allowNull: false,
+                        SystemGenerated: "true",
+                        description: "Email body content (supports Liquid templating)",
+                    },
+                    tenant_Id: {
+                        type: "UUID",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "Tenant ID for tenant-specific templates. NULL means default template.",
+                    },
+                    tenant: {
+                        relType: "BelongsTo",
+                        target: "baasix_Tenant",
+                        foreignKey: "tenant_Id",
+                        as: "tenant",
+                        SystemGenerated: "true",
+                        description: "M2O",
+                        showAs: ["name"],
+                    },
+                    isActive: {
+                        type: "Boolean",
+                        defaultValue: true,
+                        allowNull: false,
+                        SystemGenerated: "true",
+                        description: "Whether this template is active",
+                    },
+                    description: {
+                        type: "Text",
+                        allowNull: true,
+                        SystemGenerated: "true",
+                        description: "Description of the template and its purpose",
+                    },
+                },
+                indexes: [
+                    {
+                        fields: ["tenant_Id", "type"],
+                        unique: true,
+                        name: "baasix_Template_tenant_type_unique",
+                        SystemGenerated: "true",
+                    },
+                    {
+                        fields: ["type"],
+                        name: "baasix_Template_type_idx",
+                        SystemGenerated: "true",
+                    },
+                ],
+            },
+        },
     ],
 };
 

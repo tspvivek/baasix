@@ -821,6 +821,10 @@ export class SchemaManager {
       case 'Text':
         pgType = 'TEXT';
         break;
+      case 'HTML':
+        // HTML content - stored as TEXT in database
+        pgType = 'TEXT';
+        break;
       case 'Integer':
         // Use SERIAL for auto-increment integers
         pgType = hasAutoIncrement ? 'SERIAL' : 'INTEGER';
@@ -1010,9 +1014,154 @@ export class SchemaManager {
         console.log('Default admin user created');
       }
 
+      // Seed default email templates
+      await this.seedDefaultTemplates();
+
       console.log('Seeding complete');
     } catch (error) {
       console.error('Error seeding database:', error);
+    }
+  }
+
+  /**
+   * Seed default email templates into baasix_Template table
+   */
+  private async seedDefaultTemplates(): Promise<void> {
+    const sql = getSqlClient();
+
+    // Check if templates table exists
+    const templateTableExists = await sql`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_name = 'baasix_Template'
+      )
+    `;
+
+    if (!templateTableExists[0].exists) {
+      console.log('baasix_Template table does not exist yet, skipping template seeding');
+      return;
+    }
+
+    const defaultTemplates = [
+      {
+        type: 'inviteNewUser',
+        subject: "You've been invited to join {{ tenant }}",
+        body: `<h2>Welcome!</h2>
+<p>Hi,</p>
+<p>You've been invited by <strong>{{ inviterName }}</strong> to join <strong>{{ tenant }}</strong>.</p>
+<p>Click the button below to accept your invitation and create your account:</p>
+<p style="text-align: center; margin: 30px 0;">
+  <a href="{{ inviteLink }}" style="background-color: #0066cc; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Accept Invitation</a>
+</p>
+<p><strong>Note:</strong> This invitation will expire on {{ expirationDate }}.</p>
+<p>If you didn't expect this invitation, you can safely ignore this email.</p>`,
+        description: 'Template for inviting new users who do not have an account yet'
+      },
+      {
+        type: 'inviteExistingUser',
+        subject: "You've been invited to join {{ tenant }}",
+        body: `<h2>New Invitation</h2>
+<p>Hi,</p>
+<p>You've been invited by <strong>{{ inviterName }}</strong> to join <strong>{{ tenant }}</strong>.</p>
+<p>Since you already have an account, click the button below to accept the invitation:</p>
+<p style="text-align: center; margin: 30px 0;">
+  <a href="{{ inviteLink }}" style="background-color: #0066cc; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Accept Invitation</a>
+</p>
+<p><strong>Note:</strong> This invitation will expire on {{ expirationDate }}.</p>
+<p>If you didn't expect this invitation, you can safely ignore this email.</p>`,
+        description: 'Template for inviting existing users to a new tenant'
+      },
+      {
+        type: 'magicLinkUrl',
+        subject: 'Sign in to {{ project_name }}',
+        body: `<h2>Sign In Request</h2>
+<p>Hi {{ name }},</p>
+<p>Click the button below to sign in to your account:</p>
+<p style="text-align: center; margin: 30px 0;">
+  <a href="{{ magicLinkUrl }}" style="background-color: #0066cc; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Sign In</a>
+</p>
+<p>This link will expire in 15 minutes for security purposes.</p>
+<p>If you didn't request this sign-in link, you can safely ignore this email.</p>`,
+        description: 'Template for magic link URL authentication'
+      },
+      {
+        type: 'magicLinkCode',
+        subject: 'Your sign in code for {{ project_name }}',
+        body: `<h2>Sign In Code</h2>
+<p>Hi {{ name }},</p>
+<p>Use the following code to sign in to your account:</p>
+<p style="text-align: center; margin: 30px 0;">
+  <span style="background-color: #f5f5f5; padding: 16px 32px; font-size: 24px; font-family: monospace; letter-spacing: 4px; border-radius: 4px; display: inline-block;">{{ code }}</span>
+</p>
+<p>This code will expire in 15 minutes for security purposes.</p>
+<p>If you didn't request this code, you can safely ignore this email.</p>`,
+        description: 'Template for magic link code authentication'
+      },
+      {
+        type: 'passwordReset',
+        subject: 'Reset your password for {{ project_name }}',
+        body: `<h2>Password Reset</h2>
+<p>Hi {{ name }},</p>
+<p>We received a request to reset your password. Click the button below to choose a new password:</p>
+<p style="text-align: center; margin: 30px 0;">
+  <a href="{{ resetUrl }}" style="background-color: #0066cc; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Reset Password</a>
+</p>
+<p>This link will expire in 1 hour for security purposes.</p>
+<p>If you didn't request a password reset, you can safely ignore this email. Your password will remain unchanged.</p>`,
+        description: 'Template for password reset emails'
+      },
+      {
+        type: 'emailVerification',
+        subject: 'Verify your email for {{ project_name }}',
+        body: `<h2>Email Verification</h2>
+<p>Hi {{ name }},</p>
+<p>Please verify your email address by clicking the button below:</p>
+<p style="text-align: center; margin: 30px 0;">
+  <a href="{{ verifyUrl }}" style="background-color: #0066cc; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Verify Email</a>
+</p>
+<p>This link will expire in 24 hours.</p>
+<p>If you didn't create an account, you can safely ignore this email.</p>`,
+        description: 'Template for email verification'
+      },
+      {
+        type: 'welcome',
+        subject: 'Welcome to {{ project_name }}!',
+        body: `<h2>Welcome!</h2>
+<p>Hi {{ name }},</p>
+<p>Thank you for joining {{ project_name }}! We're excited to have you on board.</p>
+<p>Your account has been successfully created and you're ready to get started.</p>
+<p style="text-align: center; margin: 30px 0;">
+  <a href="{{ loginUrl }}" style="background-color: #0066cc; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Get Started</a>
+</p>
+<p>If you have any questions, feel free to reach out to our support team.</p>`,
+        description: 'Template for welcome emails to new users'
+      },
+      {
+        type: 'notification',
+        subject: '{{ notification_title }}',
+        body: `<h2>{{ notification_title }}</h2>
+<p>Hi {{ name }},</p>
+<div>{{ notification_message }}</div>
+{% if action_url %}
+<p style="text-align: center; margin: 30px 0;">
+  <a href="{{ action_url }}" style="background-color: #0066cc; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">{{ action_text | default: 'View Details' }}</a>
+</p>
+{% endif %}`,
+        description: 'Generic notification template'
+      }
+    ];
+
+    try {
+      for (const template of defaultTemplates) {
+        await sql`
+          INSERT INTO "baasix_Template" (id, type, subject, body, "tenant_Id", "isActive", description)
+          VALUES (gen_random_uuid(), ${template.type}, ${template.subject}, ${template.body}, NULL, true, ${template.description})
+          ON CONFLICT ("tenant_Id", type) DO NOTHING
+        `;
+      }
+      console.log('Default email templates created');
+    } catch (error) {
+      console.error('Error seeding default templates:', error);
     }
   }
 

@@ -19,7 +19,7 @@ const VALID_DATA_TYPES = [
   'integer', 'bigint', 'smallint', 'serial', 'bigserial',
   'real', 'double precision', 'decimal', 'numeric', 'float',
   // String types
-  'text', 'varchar', 'char', 'string',
+  'text', 'varchar', 'char', 'string', 'html',
   // Date/Time types
   'timestamp', 'timestamp with time zone', 'date', 'time', 'datetime',
   'time with time zone', 'interval',

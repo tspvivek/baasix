@@ -52,6 +52,11 @@ export function mapJsonTypeToDrizzle(fieldName: string, fieldSchema: FieldSchema
       column = text(fieldName); // Will need custom type for citext
       break;
 
+    case 'HTML':
+      // HTML content - stored as text, displayed with WYSIWYG editor
+      column = text(fieldName);
+      break;
+
     // Numeric types
     case 'Integer':
       column = integer(fieldName);
