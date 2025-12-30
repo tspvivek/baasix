@@ -1,11 +1,11 @@
 import request from "supertest";
 import { destroyAllTablesInDB, startServerForTesting } from "../baasix";
 import path from "path";
-//import { fileURLToPath } from "url";
+import { fileURLToPath } from "url";
 import { beforeAll, test, expect, describe, afterAll } from "@jest/globals";
 
-// const __filename = fileURLToPath(import.meta.url);
-// const __dirname = path.dirname(__filename);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 let app;
 let adminToken;

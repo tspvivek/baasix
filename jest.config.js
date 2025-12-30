@@ -6,8 +6,8 @@ export default {
     testPathIgnorePatterns: ["/node_modules/", "/dist/"],
     coveragePathIgnorePatterns: ["/node_modules/"],
     transformIgnorePatterns: [
-        // Transform better-auth and better-call ESM modules
-        'node_modules/(?!(better-auth|better-call))',
+        // Transform ESM-only modules (better-auth, better-call, msw, etc.)
+        'node_modules/(?!(better-auth|better-call|msw|@bundled-es-modules|@mswjs|outvariant|strict-event-emitter|cookie|@open-draft))',
     ],
     setupFilesAfterEnv: ["<rootDir>/test/setup.js"],
     testSequencer: "<rootDir>/test/testSequencer.js",
