@@ -1755,6 +1755,7 @@ export const systemSchemas = {
                     {
                         fields: ["tenant_Id", "type"],
                         unique: true,
+                        nullsNotDistinct: true,
                         name: "baasix_Template_tenant_type_unique",
                         SystemGenerated: "true",
                     },

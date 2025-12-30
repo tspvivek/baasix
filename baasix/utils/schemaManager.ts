@@ -777,8 +777,10 @@ export class SchemaManager {
       const fields = indexDef.fields.map((f: string) => `"${f}"`).join(', ');
       const indexName = indexDef.name || `${tableName}_${indexDef.fields.join('_')}_idx`;
       const unique = indexDef.unique ? 'UNIQUE' : '';
+      // Support NULLS NOT DISTINCT for unique indexes (PostgreSQL 15+)
+      const nullsNotDistinct = indexDef.unique && indexDef.nullsNotDistinct ? ' NULLS NOT DISTINCT' : '';
       
-      const createIndexSQL = `CREATE ${unique} INDEX IF NOT EXISTS "${indexName}" ON "${tableName}" (${fields})`;
+      const createIndexSQL = `CREATE ${unique} INDEX IF NOT EXISTS "${indexName}" ON "${tableName}" (${fields})${nullsNotDistinct}`;
       
       await sql.unsafe(createIndexSQL);
       console.log(`Created index: ${indexName} on ${tableName}`);
@@ -1382,6 +1384,7 @@ export class SchemaManager {
       name?: string;
       fields: string[];
       unique?: boolean;
+      nullsNotDistinct?: boolean;
       type?: 'BTREE' | 'HASH' | 'GIST' | 'GIN' | 'FULLTEXT';
     }>
   ): Promise<void> {
@@ -1393,6 +1396,8 @@ export class SchemaManager {
         const unique = index.unique ? 'UNIQUE' : '';
         const method = index.type || 'BTREE';
         const fields = index.fields.map(f => `"${f}"`).join(', ');
+        // Support NULLS NOT DISTINCT for unique indexes (PostgreSQL 15+)
+        const nullsNotDistinct = index.unique && index.nullsNotDistinct ? ' NULLS NOT DISTINCT' : '';
 
         // Check if index already exists
         const exists = await sql`
@@ -1406,7 +1411,7 @@ export class SchemaManager {
         if (!exists[0].exists) {
           await sql.unsafe(`
             CREATE ${unique} INDEX "${indexName}"
-            ON "${tableName}" USING ${method} (${fields})
+            ON "${tableName}" USING ${method} (${fields})${nullsNotDistinct}
           `);
           console.log(`Created index ${indexName} on ${tableName}`);
         }
@@ -1691,6 +1696,8 @@ export class SchemaManager {
       const fields = indexData.fields;
       const indexName = indexData.name || `${collectionName}_${fields.join('_')}_idx`;
       const unique = indexData.unique ? 'UNIQUE' : '';
+      // Support NULLS NOT DISTINCT for unique indexes (PostgreSQL 15+)
+      const nullsNotDistinct = indexData.unique && indexData.nullsNotDistinct ? ' NULLS NOT DISTINCT' : '';
 
       // Check if table exists
       const tableExists = await sql`
@@ -1720,7 +1727,7 @@ export class SchemaManager {
 
       // Build CREATE INDEX statement
       const fieldList = fields.map((f: string) => `"${f}"`).join(', ');
-      const createIndexSQL = `CREATE ${unique} INDEX "${indexName}" ON "${collectionName}" (${fieldList})`;
+      const createIndexSQL = `CREATE ${unique} INDEX "${indexName}" ON "${collectionName}" (${fieldList})${nullsNotDistinct}`;
 
       await sql.unsafe(createIndexSQL);
       console.log(`Created index ${indexName} on ${collectionName}`);
