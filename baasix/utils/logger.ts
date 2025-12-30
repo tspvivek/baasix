@@ -31,14 +31,13 @@ let isInitialized = false;
  * This should be called once at server startup
  */
 export function initializeLogger(options?: BaasixLoggerOptions): Logger {
-  const debugging = env.get("DEBUGGING") === "true";
   const nodeEnv = env.get("NODE_ENV") || "development";
   const isPretty = options?.pretty ?? (nodeEnv === "development");
   
   // Determine log level from options, env, or defaults
   const level = options?.level 
     ?? env.get("LOG_LEVEL") 
-    ?? (debugging ? "debug" : "info");
+    ?? "info";
 
   // Build pino options
   const pinoOptions: LoggerOptions = {
@@ -128,7 +127,8 @@ function processLogArgs(args: unknown[]): unknown[] {
  * This maintains backward compatibility with existing code using console.*
  */
 function overrideConsoleMethods(): void {
-  const debugging = env.get("DEBUGGING") === "true";
+  const logLevel = env.get("LOG_LEVEL") || "info";
+  const isDebugEnabled = ["debug", "trace"].includes(logLevel);
 
   // Store original console methods for potential direct access
   const originalConsole = {
@@ -139,9 +139,9 @@ function overrideConsoleMethods(): void {
     debug: console.debug,
   };
 
-  // Override console.log - only logs when debugging is enabled (maps to debug level)
+  // Override console.log - only logs when log level is debug or trace (maps to debug level)
   console.log = function (...args: unknown[]) {
-    if (debugging) {
+    if (isDebugEnabled) {
       if (args.length === 1 && typeof args[0] === "string") {
         logger.debug(args[0]);
       } else if (args.length === 1) {
@@ -193,9 +193,9 @@ function overrideConsoleMethods(): void {
     }
   };
 
-  // Override console.debug - only logs when debugging is enabled
+  // Override console.debug - only logs when log level is debug or trace
   console.debug = function (...args: unknown[]) {
-    if (debugging) {
+    if (isDebugEnabled) {
       if (args.length === 1 && typeof args[0] === "string") {
         logger.debug(args[0]);
       } else if (args.length === 1) {

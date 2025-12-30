@@ -226,8 +226,12 @@ async function initializeApp() {
 
 /**
  * Connect to database with retry logic
+ * Uses DATABASE_MAX_RETRY and DATABASE_RETRY_INTERVAL env variables
  */
-async function connectWithRetry(retries = 5, delay = 5000) {
+async function connectWithRetry(
+  retries = parseInt(env.get("DATABASE_MAX_RETRY") || "3"),
+  delay = parseInt(env.get("DATABASE_RETRY_INTERVAL") || "5000")
+) {
   for (let i = 0; i < retries; i++) {
     try {
       // Test database connection
@@ -235,8 +239,9 @@ async function connectWithRetry(retries = 5, delay = 5000) {
       console.info("Database connected successfully");
       return;
     } catch (err: any) {
-      console.error(`Database connection attempt ${i + 1} failed:`, err);
+      console.error(`Database connection attempt ${i + 1}/${retries} failed:`, err.message);
       if (i === retries - 1) throw err;
+      console.info(`Retrying in ${delay}ms...`);
       await new Promise((res) => setTimeout(res, delay));
     }
   }

@@ -29,11 +29,7 @@ startServer().catch(console.error);
 // 3. Add to package.json: "type": "module"
 
 // 4. Create .env
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=baasix
-DB_USER=postgres
-DB_PASSWORD=password
+DATABASE_URL="postgresql://postgres:password@localhost:5432/baasix"
 SECRET_KEY=your-32-character-secret-key-here
 
 // 5. Run
@@ -1009,16 +1005,14 @@ describe("Products API", () => {
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| DB_HOST | Yes | - | PostgreSQL host |
-| DB_PORT | Yes | 5432 | PostgreSQL port |
-| DB_NAME | Yes | - | Database name |
-| DB_USER | Yes | - | Database user |
-| DB_PASSWORD | Yes | - | Database password |
-| SECRET_KEY | Yes | - | JWT secret (32+ chars) |
-| COOKIE_SECRET | Yes | - | Cookie secret (32+ chars) |
+| DATABASE_URL | Yes | - | PostgreSQL connection string |
+| SECRET_KEY | Yes | - | JWT/encryption secret (32+ chars) |
 | PORT | No | 8056 | HTTP port |
-| CACHE_REDIS_URL | No | - | Redis URL |
-| CACHE_TTL | No | 30000 | Cache TTL (ms) |
+| LOG_LEVEL | No | info | Log level (fatal/error/warn/info/debug/trace) |
+| CACHE_ENABLED | No | false | Enable caching |
+| CACHE_ADAPTER | No | memory | Cache adapter (memory/redis/upstash) |
+| CACHE_REDIS_URL | No | - | Redis URL for cache |
+| CACHE_TTL | No | 300 | Cache TTL (seconds) |
 | MULTI_TENANT | No | false | Enable multi-tenancy |
 | SOCKET_ENABLED | No | false | Enable Socket.IO |
 | PUBLIC_REGISTRATION | No | true | Allow public registration |

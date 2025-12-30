@@ -35,15 +35,10 @@ startServer().catch(console.error);
 
 ```env
 # Database (PostgreSQL 14+)
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=baasix
-DB_USER=postgres
-DB_PASSWORD=yourpassword
+DATABASE_URL="postgresql://postgres:yourpassword@localhost:5432/baasix"
 
 # Security (REQUIRED - min 32 chars)
 SECRET_KEY=your-32-character-secret-key-here
-COOKIE_SECRET=another-32-character-secret-key
 ```
 
 ## Optional Environment Variables
@@ -52,9 +47,11 @@ COOKIE_SECRET=another-32-character-secret-key
 # Server
 PORT=8056                          # HTTP port
 
-# Cache (Redis 6+)
+# Cache
+CACHE_ENABLED=true
+CACHE_ADAPTER=memory               # memory, redis, or upstash
 CACHE_REDIS_URL=redis://localhost:6379
-CACHE_TTL=30000                    # Default cache TTL in ms
+CACHE_TTL=300                      # Default cache TTL in seconds
 
 # Multi-tenancy
 MULTI_TENANT=false                 # Enable multi-tenant mode

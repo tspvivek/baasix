@@ -23,7 +23,7 @@ const registerEndpoint = (app: Express) => {
   
   // Initialize the new auth module
   const authOptions: AuthRouteOptions = {
-    secret: env.get("SECRET_KEY") || env.get("JWT_SECRET") || "",
+    secret: env.get("SECRET_KEY") || "",
     baseURL: env.get("BASE_URL"),
     session: {
       expiresIn: parseInt(env.get("ACCESS_TOKEN_EXPIRES_IN") || "604800"), // 7 days default

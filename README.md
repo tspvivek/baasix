@@ -277,16 +277,16 @@ startServer({
 ### 5. Create .env file
 
 ```env
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=baasix
-DB_USER=postgres
-DB_PASSWORD=yourpassword
+# Database
+DATABASE_URL="postgresql://postgres:yourpassword@localhost:5432/baasix"
 
+# Server
 PORT=8056
 SECRET_KEY=your-secret-key-min-32-chars
 
-CACHE_REDIS_URL=redis://localhost:6379
+# Cache (optional - defaults to memory)
+# CACHE_ADAPTER=redis
+# CACHE_REDIS_URL=redis://localhost:6379
 ```
 
 ### 6. Start the server

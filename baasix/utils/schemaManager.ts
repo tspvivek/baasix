@@ -1,7 +1,7 @@
 import { pgTable, text, jsonb, timestamp } from 'drizzle-orm/pg-core';
 import { eq, inArray } from 'drizzle-orm';
 import argon2 from 'argon2';
-import { getDatabase, getSqlClient } from './db.js';
+import { getDatabase, getSqlClient, isPgVersionAtLeast } from './db.js';
 import { mapJsonTypeToDrizzle, isRelationField } from './typeMapper.js';
 import { relationBuilder, createForeignKeySQL } from './relationUtils.js';
 import systemSchemaModule from './systemschema.js';
@@ -778,7 +778,15 @@ export class SchemaManager {
       const indexName = indexDef.name || `${tableName}_${indexDef.fields.join('_')}_idx`;
       const unique = indexDef.unique ? 'UNIQUE' : '';
       // Support NULLS NOT DISTINCT for unique indexes (PostgreSQL 15+)
-      const nullsNotDistinct = indexDef.unique && indexDef.nullsNotDistinct ? ' NULLS NOT DISTINCT' : '';
+      let nullsNotDistinct = '';
+      if (indexDef.unique && indexDef.nullsNotDistinct) {
+        const supportsNullsNotDistinct = await isPgVersionAtLeast(15);
+        if (supportsNullsNotDistinct) {
+          nullsNotDistinct = ' NULLS NOT DISTINCT';
+        } else {
+          console.warn(`Index ${indexName}: NULLS NOT DISTINCT requires PostgreSQL 15+, ignoring option`);
+        }
+      }
       
       const createIndexSQL = `CREATE ${unique} INDEX IF NOT EXISTS "${indexName}" ON "${tableName}" (${fields})${nullsNotDistinct}`;
       
@@ -1389,6 +1397,8 @@ export class SchemaManager {
     }>
   ): Promise<void> {
     const sql = getSqlClient();
+    // Check PostgreSQL version once for all indexes
+    const supportsNullsNotDistinct = await isPgVersionAtLeast(15);
 
     for (const index of indexes) {
       try {
@@ -1397,7 +1407,14 @@ export class SchemaManager {
         const method = index.type || 'BTREE';
         const fields = index.fields.map(f => `"${f}"`).join(', ');
         // Support NULLS NOT DISTINCT for unique indexes (PostgreSQL 15+)
-        const nullsNotDistinct = index.unique && index.nullsNotDistinct ? ' NULLS NOT DISTINCT' : '';
+        let nullsNotDistinct = '';
+        if (index.unique && index.nullsNotDistinct) {
+          if (supportsNullsNotDistinct) {
+            nullsNotDistinct = ' NULLS NOT DISTINCT';
+          } else {
+            console.warn(`Index ${indexName}: NULLS NOT DISTINCT requires PostgreSQL 15+, ignoring option`);
+          }
+        }
 
         // Check if index already exists
         const exists = await sql`
@@ -1697,7 +1714,15 @@ export class SchemaManager {
       const indexName = indexData.name || `${collectionName}_${fields.join('_')}_idx`;
       const unique = indexData.unique ? 'UNIQUE' : '';
       // Support NULLS NOT DISTINCT for unique indexes (PostgreSQL 15+)
-      const nullsNotDistinct = indexData.unique && indexData.nullsNotDistinct ? ' NULLS NOT DISTINCT' : '';
+      let nullsNotDistinct = '';
+      if (indexData.unique && indexData.nullsNotDistinct) {
+        const supportsNullsNotDistinct = await isPgVersionAtLeast(15);
+        if (supportsNullsNotDistinct) {
+          nullsNotDistinct = ' NULLS NOT DISTINCT';
+        } else {
+          console.warn(`Index ${indexName}: NULLS NOT DISTINCT requires PostgreSQL 15+, ignoring option`);
+        }
+      }
 
       // Check if table exists
       const tableExists = await sql`

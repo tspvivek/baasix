@@ -105,7 +105,7 @@ export async function getRolesAndPermissions(roleId: string | number): Promise<{
  * Verify JWT token and return decoded payload
  */
 export function verifyJWT(token: string): any {
-  const secret = env.get("SECRET_KEY") || env.get("JWT_SECRET");
+  const secret = env.get("SECRET_KEY");
   if (!secret) {
     throw new Error("SECRET_KEY not configured");
   }

@@ -411,6 +411,55 @@ export async function testConnection(): Promise<boolean> {
   }
 }
 
+// Cache for PostgreSQL version
+let pgVersionCache: { major: number; minor: number; full: string } | null = null;
+
+/**
+ * Get PostgreSQL server version
+ * Returns { major: number, minor: number, full: string }
+ * Caches the result after first call
+ */
+export async function getPostgresVersion(): Promise<{ major: number; minor: number; full: string }> {
+  if (pgVersionCache) {
+    return pgVersionCache;
+  }
+
+  try {
+    const sqlClient = getSqlClient();
+    const result = await sqlClient`SHOW server_version`;
+    const versionString = result[0].server_version;
+    
+    // Parse version like "15.4" or "14.9 (Ubuntu 14.9-0ubuntu0.22.04.1)"
+    const match = versionString.match(/^(\d+)\.(\d+)/);
+    if (match) {
+      pgVersionCache = {
+        major: parseInt(match[1], 10),
+        minor: parseInt(match[2], 10),
+        full: versionString,
+      };
+    } else {
+      // Fallback if parsing fails
+      pgVersionCache = { major: 14, minor: 0, full: versionString };
+    }
+    
+    return pgVersionCache;
+  } catch (error) {
+    console.warn('Failed to get PostgreSQL version, defaulting to 14:', error);
+    pgVersionCache = { major: 14, minor: 0, full: 'unknown' };
+    return pgVersionCache;
+  }
+}
+
+/**
+ * Check if PostgreSQL version supports a feature
+ * @param minMajor Minimum major version required
+ * @param minMinor Minimum minor version required (default: 0)
+ */
+export async function isPgVersionAtLeast(minMajor: number, minMinor: number = 0): Promise<boolean> {
+  const version = await getPostgresVersion();
+  return version.major > minMajor || (version.major === minMajor && version.minor >= minMinor);
+}
+
 /**
  * Get helper to extract instance ID
  */
@@ -434,6 +483,8 @@ export default {
   createTransaction,
   testConnection,
   getInstanceId,
+  getPostgresVersion,
+  isPgVersionAtLeast,
 };
 
 // Export cache service for use in other modules
