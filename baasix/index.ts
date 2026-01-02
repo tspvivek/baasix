@@ -56,6 +56,9 @@ export {
 // Export auth module
 export * from './auth/index.js';
 
+// Export auth instance getter (for extensions to generate tokens/shadow users)
+export { getAuthInstance } from './routes/auth.route.js';
+
 // Export custom types
 export * from './customTypes/index.js';
 
