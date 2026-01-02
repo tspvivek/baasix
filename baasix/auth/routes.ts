@@ -25,9 +25,10 @@ export const setTokenInResponse = (
 ): { token?: string; message?: string; authMode: string } => {
   if (authMode === "cookie") {
     // Get cookie settings from environment variables with secure defaults
+    const secureEnv = env?.get("AUTH_COOKIE_SECURE");
     const cookieOptions: any = {
       httpOnly: env?.get("AUTH_COOKIE_HTTP_ONLY") !== "false", // Default: true (secure)
-      secure: env?.get("AUTH_COOKIE_SECURE") === "false" ? false : env?.get("NODE_ENV") === "production", // Default: true in production
+      secure: secureEnv !== undefined ? secureEnv === "true" : env?.get("NODE_ENV") === "production", // Explicit value or default to true in production
       sameSite: env?.get("AUTH_COOKIE_SAME_SITE") || (env?.get("NODE_ENV") === "production" ? "strict" : "lax"), // Default: strict in prod, lax in dev
       maxAge: (parseInt(env?.get("ACCESS_TOKEN_EXPIRES_IN") || "604800") || 604800) * 1000, // Default 7 days
       path: env?.get("AUTH_COOKIE_PATH") || "/", // Default: all paths

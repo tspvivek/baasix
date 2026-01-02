@@ -163,6 +163,17 @@ const registerEndpoint = (app: Express) => {
         accountability: req.accountability as any,
       });
 
+      // Protect system role names from being changed
+      if (collection === "baasix_Role" && data.name !== undefined) {
+        const existingRole = await itemsService.readOne(id);
+        const protectedRoles = ["administrator", "public"];
+        // Only block if trying to change the name of a protected role
+        if (protectedRoles.includes(existingRole.name?.toLowerCase()) && 
+            data.name.toLowerCase() !== existingRole.name?.toLowerCase()) {
+          return next(new APIError("System role names cannot be changed", 403));
+        }
+      }
+
       const updatedItemId = await itemsService.updateOne(id, data);
 
       // Invalidate settings cache if needed
@@ -190,6 +201,15 @@ const registerEndpoint = (app: Express) => {
       const itemsService = new ItemsService(collection, {
         accountability: req.accountability as any,
       });
+
+      // Protect system roles from deletion
+      if (collection === "baasix_Role") {
+        const existingRole = await itemsService.readOne(id);
+        const protectedRoles = ["administrator", "public"];
+        if (protectedRoles.includes(existingRole.name?.toLowerCase())) {
+          return next(new APIError("System roles cannot be deleted", 403));
+        }
+      }
 
       // Get item before deleting for cache invalidation
       let itemToDelete = null;
