@@ -446,7 +446,7 @@ class SettingsService {
       });
 
       const tenantSettings = await itemsService.readByQuery({
-        filter: { app_url: { _ilike: appUrl } },
+        filter: { app_url: { iLike: appUrl } },
         limit: 1,
         fields: ["tenant_Id"],
       });

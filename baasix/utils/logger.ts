@@ -129,6 +129,7 @@ function processLogArgs(args: unknown[]): unknown[] {
 function overrideConsoleMethods(): void {
   const logLevel = env.get("LOG_LEVEL") || "info";
   const isDebugEnabled = ["debug", "trace"].includes(logLevel);
+  const warnStackEnabled = env.get("LOG_WARN_STACK") === "true";
 
   // Store original console methods for potential direct access
   const originalConsole = {
@@ -165,12 +166,33 @@ function overrideConsoleMethods(): void {
 
   // Override console.warn - always logs (maps to warn level)
   console.warn = function (...args: unknown[]) {
+    // Optionally capture stack trace for warnings
+    const stackTrace = warnStackEnabled ? new Error().stack?.split('\n').slice(2).join('\n') : undefined;
+    
     if (args.length === 1 && typeof args[0] === "string") {
-      logger.warn(args[0]);
+      if (stackTrace) {
+        logger.warn({ stack: stackTrace }, args[0]);
+      } else {
+        logger.warn(args[0]);
+      }
+    } else if (args.length === 1 && args[0] instanceof Error) {
+      logger.warn({ err: serializeError(args[0]) }, args[0].message);
     } else if (args.length === 1) {
-      logger.warn(args[0] as object);
+      if (stackTrace) {
+        logger.warn({ ...(args[0] as object), stack: stackTrace });
+      } else {
+        logger.warn(args[0] as object);
+      }
     } else {
-      logger.warn({ data: processLogArgs(args) }, String(args[0]));
+      // Check if any argument is an Error and log it properly
+      const errorArg = args.find(arg => arg instanceof Error) as Error | undefined;
+      if (errorArg) {
+        logger.warn({ err: serializeError(errorArg), data: processLogArgs(args) }, String(args[0]));
+      } else if (stackTrace) {
+        logger.warn({ data: processLogArgs(args), stack: stackTrace }, String(args[0]));
+      } else {
+        logger.warn({ data: processLogArgs(args) }, String(args[0]));
+      }
     }
   };
 
