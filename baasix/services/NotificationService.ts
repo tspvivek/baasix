@@ -136,13 +136,14 @@ class NotificationService {
   async getUnreadCount(userId: string): Promise<number> {
     try {
       // Use ItemsService.readByQuery to count
+      // bypassPermissions: true since users should always be able to see their own notification count
       const result = await this.itemsService.readByQuery({
         filter: {
           userId: userId,
           seen: false,
         },
         limit: -1, // Get all to count
-      });
+      }, true);
 
       return result.data.length;
     } catch (error: any) {
@@ -152,6 +153,7 @@ class NotificationService {
 
   /**
    * Get user's notifications with pagination and filtering
+   * bypassPermissions: true since the route already ensures users can only see their own notifications
    */
   async getUserNotifications(query: any = {}): Promise<any> {
     try {

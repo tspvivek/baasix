@@ -1,6 +1,6 @@
 {
     "name": "@tspvivek/baasix",
-    "version": "0.1.0-alpha.20",
+    "version": "0.1.0-alpha.21",
     "description": "Baasix - Backend-as-a-Service with 40+ tools for schema management, CRUD operations with 50+ filter operators, relationships, permissions, files, workflows, and more",
     "main": "dist/index.js",
     "type": "module",
