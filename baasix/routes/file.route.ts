@@ -200,6 +200,7 @@ const registerEndpoint = (app: Express) => {
               "Content-Length": s3Response.headers["content-length"],
               "Accept-Ranges": "bytes",
               "Cache-Control": "no-cache, no-store, must-revalidate",
+              "Content-Disposition": isDownload ? getDownloadHeaders(file) : "inline",
             });
 
             if (s3Response.headers["content-range"]) {
@@ -289,6 +290,9 @@ const registerEndpoint = (app: Express) => {
 
       if (isDownload) {
         res.setHeader("Content-Disposition", getDownloadHeaders(file));
+      } else {
+        // Explicitly set inline disposition for viewing in browser
+        res.setHeader("Content-Disposition", "inline");
       }
 
       res.send(buffer);
