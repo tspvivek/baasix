@@ -1360,10 +1360,24 @@ export class ItemsService {
     // Extract all relation paths from the query
     const relationPaths = new Set<string>();
 
+    // Helper to check if a dotted path is a qualified main table reference vs a relation path
+    // e.g., "baasix_User.createdAt" when querying baasix_User - check if "createdAt" is a column
+    const isMainTableQualifiedField = (field: string): boolean => {
+      const parts = field.split('.');
+      if (parts.length !== 2) return false;
+      const [tablePart, columnPart] = parts;
+      if (tablePart !== this.collection) return false;
+      // Check if the column exists on the main table
+      return columnPart in this.table;
+    };
+
     // From groupBy fields
     for (const field of groupBy) {
       if (field.includes('.') && !field.startsWith('date:')) {
-        relationPaths.add(field);
+        // Skip if this is a qualified reference to a main table column (e.g., "baasix_User.createdAt")
+        if (!isMainTableQualifiedField(field)) {
+          relationPaths.add(field);
+        }
       }
     }
 
@@ -1371,7 +1385,10 @@ export class ItemsService {
     for (const [, aggregateInfo] of Object.entries(aggregate as Record<string, any>)) {
       const field = aggregateInfo.field;
       if (field && field.includes('.')) {
-        relationPaths.add(field);
+        // Skip if this is a qualified reference to a main table column
+        if (!isMainTableQualifiedField(field)) {
+          relationPaths.add(field);
+        }
       }
     }
 
@@ -1435,6 +1452,9 @@ export class ItemsService {
     // Resolve all relation paths to joins
     const allJoins: any[] = [...filterJoins];
     const pathToAliasMap = new Map<string, string>(); // Maps relation path to final table alias
+
+    // Add the main table to the alias map so fields like "baasix_User.createdAt" get resolved correctly
+    pathToAliasMap.set(this.collection, this.collection);
 
     for (const relationPath of relationPaths) {
       try {
