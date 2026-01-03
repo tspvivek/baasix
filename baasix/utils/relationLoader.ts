@@ -779,8 +779,17 @@ async function loadNestedRelationsForHasMany(
         );
       }
     } else if (include.relationType === 'HasMany') {
-      // Recursively handle nested HasMany
-      await loadHasManyRelations(db, records, [include], sourceTableName);
+      // Check if this is a polymorphic (M2A) relation
+      const associationsMap = relationBuilder.getAssociations(sourceTableName);
+      const association = associationsMap?.[include.relation];
+      
+      if (association?.polymorphic) {
+        // Handle M2A relations
+        await loadM2ARelations(db, records, [include], sourceTableName);
+      } else {
+        // Recursively handle nested HasMany (non-polymorphic)
+        await loadHasManyRelations(db, records, [include], sourceTableName);
+      }
     }
   }
 }
