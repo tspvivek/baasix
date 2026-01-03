@@ -1416,6 +1416,7 @@ export class ItemsService {
     const whereClause = drizzleWhere(combinedFilter, {
       table: this.table,
       tableName: this.collection,
+      schema: this.table as any,
       joins: filterJoins
     });
 
@@ -2205,6 +2206,11 @@ export class ItemsService {
       mainData.userUpdated_Id = this.accountability.user.id;
     }
 
+    // Auto-update updatedAt timestamp if timestamps enabled (default: true)
+    if (schemaDefinition?.timestamps !== false && 'updatedAt' in this.table) {
+      mainData.updatedAt = new Date();
+    }
+
     // Convert date strings to Date objects for DateTime/Timestamp fields
     await this.convertDateFields(mainData, schemaDefinition);
 
@@ -2833,7 +2839,8 @@ export class ItemsService {
       // Check if record exists and is soft-deleted
       const whereClause = drizzleWhere(filter, {
         table: this.table,
-        tableName: this.collection
+        tableName: this.collection,
+        schema: this.table as any
       });
       const existingItems = await db
         .select()

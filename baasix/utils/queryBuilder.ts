@@ -210,7 +210,13 @@ function processFieldCondition(
   const column = getColumn(fieldName, ctx);
 
   if (!column) {
-    console.warn(`Column not found for field: ${fieldName}`);
+    // Only warn if we have a schema to check against
+    if (ctx.schema) {
+      const availableColumns = Object.keys(ctx.schema).filter(k => !k.startsWith('_'));
+      console.warn(`Column not found for field: ${fieldName}. Available columns: ${availableColumns.slice(0, 10).join(', ')}${availableColumns.length > 10 ? '...' : ''}`);
+    } else {
+      console.warn(`Column not found for field: ${fieldName} (no schema provided)`);
+    }
     return null;
   }
 

@@ -395,6 +395,65 @@ export class SchemaManager {
   }
 
   /**
+   * Normalize legacy Sequelize schemas - add default values for timestamp fields
+   * and update DB column defaults if missing
+   */
+  private async normalizeLegacySchema(collectionName: string, schema: any): Promise<any> {
+    const sql = getSqlClient();
+    const db = getDatabase();
+    let schemaUpdated = false;
+    const normalizedSchema = { ...schema, fields: { ...schema.fields } };
+
+    // Check timestamp fields if timestamps are enabled (default: true)
+    if (schema.timestamps !== false) {
+      // Normalize createdAt field
+      if (normalizedSchema.fields.createdAt && !normalizedSchema.fields.createdAt.defaultValue) {
+        normalizedSchema.fields.createdAt = {
+          ...normalizedSchema.fields.createdAt,
+          defaultValue: { type: "NOW" }
+        };
+        schemaUpdated = true;
+        
+        // Also update DB column default
+        try {
+          await sql.unsafe(`ALTER TABLE "${collectionName}" ALTER COLUMN "createdAt" SET DEFAULT NOW()`);
+          console.log(`Updated createdAt default value for ${collectionName}`);
+        } catch (error) {
+          // Column might not exist yet or already have default, ignore
+        }
+      }
+
+      // Normalize updatedAt field
+      if (normalizedSchema.fields.updatedAt && !normalizedSchema.fields.updatedAt.defaultValue) {
+        normalizedSchema.fields.updatedAt = {
+          ...normalizedSchema.fields.updatedAt,
+          defaultValue: { type: "NOW" }
+        };
+        schemaUpdated = true;
+        
+        // Also update DB column default
+        try {
+          await sql.unsafe(`ALTER TABLE "${collectionName}" ALTER COLUMN "updatedAt" SET DEFAULT NOW()`);
+          console.log(`Updated updatedAt default value for ${collectionName}`);
+        } catch (error) {
+          // Column might not exist yet or already have default, ignore
+        }
+      }
+    }
+
+    // Update schema definition in database if changed
+    if (schemaUpdated) {
+      await db
+        .update(baasixSchemaDefinition)
+        .set({ schema: normalizedSchema as any })
+        .where(eq(baasixSchemaDefinition.collectionName, collectionName));
+      console.log(`Normalized legacy schema definition for ${collectionName}`);
+    }
+
+    return normalizedSchema;
+  }
+
+  /**
    * Load all schemas from database into memory
    */
   private async loadAllSchemas(): Promise<void> {
@@ -411,18 +470,27 @@ export class SchemaManager {
 
     // First pass: Create all tables and models without FK constraints
     for (const schemaDef of sortedSchemas) {
+      // Normalize legacy Sequelize schemas (add default values for timestamp fields)
+      const normalizedSchema = await this.normalizeLegacySchema(
+        schemaDef.collectionName,
+        schemaDef.schema as any
+      );
+      
+      // Update the schemaDef with normalized schema for subsequent operations
+      schemaDef.schema = normalizedSchema;
+      
       // Store JSON schema definition for later use (e.g., in getPrimaryKey)
       this.schemaDefinitions.set(schemaDef.collectionName, schemaDef);
 
       await this.createOrUpdateModel(
         schemaDef.collectionName,
-        schemaDef.schema as any
+        normalizedSchema
       );
 
       // Create table if it doesn't exist (FK constraints will be added in second pass)
       await this.createTableFromSchema(
         schemaDef.collectionName,
-        schemaDef.schema as any,
+        normalizedSchema,
         true
       );
     }
