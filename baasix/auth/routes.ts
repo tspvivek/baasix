@@ -131,11 +131,14 @@ export function createAuthRoutes(app: Express, options: AuthRouteOptions): Baasi
   app.post(`${basePath}/register`, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, password, firstName, lastName, phone, tenant, roleName, inviteToken, authMode = "jwt" } = req.body;
-      
+
       if (!email || !password || !firstName) {
         return res.status(400).json({ message: "Email, password, and firstName are required" });
       }
-      
+
+      const ipAddress = req.ip || (req.connection as any)?.remoteAddress || null;
+      const userAgent = req.headers["user-agent"] || null;
+
       const result = await auth.signUp({
         email,
         password,
@@ -145,6 +148,8 @@ export function createAuthRoutes(app: Express, options: AuthRouteOptions): Baasi
         tenant,
         roleName,
         inviteToken,
+        ipAddress,
+        userAgent,
       });
       
       // Check if email verification is required
@@ -203,16 +208,21 @@ export function createAuthRoutes(app: Express, options: AuthRouteOptions): Baasi
   app.post(`${basePath}/login`, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, password, tenant_Id, authType, authMode = "jwt" } = req.body;
-      
+
       if (!email || !password) {
         return res.status(400).json({ message: "Email and password are required" });
       }
-      
+
+      const ipAddress = req.ip || (req.connection as any)?.remoteAddress || null;
+      const userAgent = req.headers["user-agent"] || null;
+
       const result = await auth.signIn({
         email,
         password,
         tenant_Id,
         authType,
+        ipAddress,
+        userAgent,
       });
       
       // Set token in response based on authMode
@@ -890,9 +900,14 @@ export function createAuthRoutes(app: Express, options: AuthRouteOptions): Baasi
       }
       
       // Create new session
+      const ipAddress = req.ip || (req.connection as any)?.remoteAddress || null;
+      const userAgent = req.headers["user-agent"] || null;
+
       const session = await auth.sessionService.createSession({
         user: req.accountability.user as any,
         tenantId: tenant.id,
+        ipAddress,
+        userAgent,
         type: authType || "default",
       });
       

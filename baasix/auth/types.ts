@@ -328,6 +328,8 @@ export interface SignUpEmailInput {
   tenant?: { name: string } | null;
   roleName?: string;
   inviteToken?: string;
+  ipAddress?: string | null;
+  userAgent?: string | null;
 }
 
 export interface SignInEmailInput {
@@ -336,6 +338,8 @@ export interface SignInEmailInput {
   tenant_Id?: string;
   authType?: string;
   rememberMe?: boolean;
+  ipAddress?: string | null;
+  userAgent?: string | null;
 }
 
 export interface SignInSocialInput {

@@ -97,7 +97,8 @@ export interface BaasixAuth {
   generateTokenForUser(userId: string, options?: {
     tenantId?: string | null;
     sessionType?: string;
-    ipAddress?: string;
+    ipAddress?: string | null;
+    userAgent?: string | null;
   }): Promise<AuthResponse>;
 }
 
@@ -202,15 +203,17 @@ export function createAuth(options: AuthOptions): BaasixAuth {
     user: User,
     tenantId?: string | null,
     ipAddress?: string | null,
+    userAgent?: string | null,
     sessionType: string = "default"
   ): Promise<AuthResponse> {
     const { role, permissions, tenant } = await getUserRoleAndPermissions(user.id, tenantId);
-    
+
     // Create session
     const session = await sessionService.createSession({
       user,
       tenantId: tenant?.id || null,
       ipAddress,
+      userAgent,
       type: sessionType,
     });
     
@@ -242,7 +245,7 @@ export function createAuth(options: AuthOptions): BaasixAuth {
     
     // Email/Password Sign Up
     async signUp(input) {
-      const { email, password, firstName, lastName, phone, tenant, roleName, inviteToken } = input;
+      const { email, password, firstName, lastName, phone, tenant, roleName, inviteToken, ipAddress, userAgent } = input;
       
       // Validate email and password are enabled
       if (options.emailAndPassword?.enabled === false) {
@@ -357,13 +360,13 @@ export function createAuth(options: AuthOptions): BaasixAuth {
           requiresEmailVerification: true,
         };
       }
-      
-      return createAuthResponse(user, tenantId);
+
+      return createAuthResponse(user, tenantId, ipAddress, userAgent);
     },
     
     // Email/Password Sign In
     async signIn(input) {
-      const { email, password, tenant_Id, authType = "default" } = input;
+      const { email, password, tenant_Id, authType = "default", ipAddress, userAgent } = input;
       
       // Validate email and password are enabled
       if (options.emailAndPassword?.enabled === false) {
@@ -414,7 +417,7 @@ export function createAuth(options: AuthOptions): BaasixAuth {
         await sessionService.invalidateSession(session.token);
       }
       
-      return createAuthResponse(user, tenant_Id, null, authType);
+      return createAuthResponse(user, tenant_Id, ipAddress, userAgent, authType);
     },
     
     // Get OAuth URL
@@ -711,14 +714,14 @@ export function createAuth(options: AuthOptions): BaasixAuth {
     
     // Generate Token for User (for extensions)
     async generateTokenForUser(userId, options = {}) {
-      const { tenantId = null, sessionType = "default", ipAddress = null } = options;
-      
+      const { tenantId = null, sessionType = "default", ipAddress = null, userAgent = null } = options;
+
       const user = await adapter.findUserById(userId);
       if (!user) {
         throw new Error("User not found");
       }
-      
-      return createAuthResponse(user, tenantId, ipAddress, sessionType);
+
+      return createAuthResponse(user, tenantId, ipAddress, userAgent, sessionType);
     },
   };
 }
