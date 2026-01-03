@@ -545,7 +545,8 @@ export class SchemaManager {
           // Extract just the type and constraints from columnDef (remove field name)
           const columnDefParts = columnDef.split(' ').slice(1).join(' '); // Remove first part which is field name
           try {
-            await sql.unsafe(`ALTER TABLE "${collectionName}" ADD COLUMN ${columnDef}`);
+            // Use IF NOT EXISTS for safety in case of race conditions or schema query issues
+            await sql.unsafe(`ALTER TABLE "${collectionName}" ADD COLUMN IF NOT EXISTS ${columnDef}`);
             console.log(`Added missing column ${fieldName} to ${collectionName}`);
           } catch (error) {
             console.error(`Failed to add column ${fieldName} to ${collectionName}:`, error);
@@ -557,19 +558,31 @@ export class SchemaManager {
     // Add timestamp columns if needed
     if (schema.timestamps !== false) {
       if (!existingColumnNames.includes('createdAt')) {
-        await sql.unsafe(`ALTER TABLE "${collectionName}" ADD COLUMN "createdAt" TIMESTAMPTZ DEFAULT NOW()`);
-        console.log(`Added createdAt column to ${collectionName}`);
+        try {
+          await sql.unsafe(`ALTER TABLE "${collectionName}" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMPTZ DEFAULT NOW()`);
+          console.log(`Added createdAt column to ${collectionName}`);
+        } catch (error) {
+          // Column might already exist due to race condition, ignore
+        }
       }
       if (!existingColumnNames.includes('updatedAt')) {
-        await sql.unsafe(`ALTER TABLE "${collectionName}" ADD COLUMN "updatedAt" TIMESTAMPTZ DEFAULT NOW()`);
-        console.log(`Added updatedAt column to ${collectionName}`);
+        try {
+          await sql.unsafe(`ALTER TABLE "${collectionName}" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMPTZ DEFAULT NOW()`);
+          console.log(`Added updatedAt column to ${collectionName}`);
+        } catch (error) {
+          // Column might already exist due to race condition, ignore
+        }
       }
     }
 
     // Add deletedAt column if paranoid mode is enabled
     if (schema.paranoid && !existingColumnNames.includes('deletedAt')) {
-      await sql.unsafe(`ALTER TABLE "${collectionName}" ADD COLUMN "deletedAt" TIMESTAMPTZ`);
-      console.log(`Added deletedAt column to ${collectionName}`);
+      try {
+        await sql.unsafe(`ALTER TABLE "${collectionName}" ADD COLUMN IF NOT EXISTS "deletedAt" TIMESTAMPTZ`);
+        console.log(`Added deletedAt column to ${collectionName}`);
+      } catch (error) {
+        // Column might already exist due to race condition, ignore
+      }
     }
   }
 
@@ -745,7 +758,8 @@ export class SchemaManager {
                         columnType === 'Integer' ? 'INTEGER' :
                         columnType === 'String' ? 'TEXT' : 'UUID';
 
-          await sql.unsafe(`ALTER TABLE "${collectionName}" ADD COLUMN "${foreignKey}" ${pgType}`);
+          // Use IF NOT EXISTS for safety
+          await sql.unsafe(`ALTER TABLE "${collectionName}" ADD COLUMN IF NOT EXISTS "${foreignKey}" ${pgType}`);
           console.log(`Added column ${foreignKey} to ${collectionName}`);
           columnsAdded = true;
 
