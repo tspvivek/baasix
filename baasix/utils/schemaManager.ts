@@ -352,7 +352,7 @@ export class SchemaManager {
     // If sorted length != schemas length, there's a circular dependency
     // In that case, just return original order and let FK constraints be added later
     if (sorted.length !== schemas.length) {
-      console.warn('Circular dependency detected in schemas, using original order');
+      console.info('Circular dependency detected in schemas, using original order');
       return schemas;
     }
 

@@ -35,6 +35,9 @@ const getAdminAppPath = () => getBaasixPath("app");
 
 export const app = express();
 
+// Trust proxy - important for rate limiting and getting real client IP behind reverse proxy
+app.set("trust proxy", 1);
+
 // CORS configuration
 const getStaticAllowedOrigins = () => {
   return env.get("AUTH_CORS_ALLOWED_ORIGINS")
@@ -130,9 +133,43 @@ app.use(bodyParser.json({ limit: "20mb" }));
 app.use(cookieParser());
 app.use(morgan("combined"));
 
+// Helper to extract userId from JWT token for rate limiting
+const extractUserIdFromToken = (req: express.Request): string | null => {
+  try {
+    // Check Authorization header first, then cookie
+    const authHeader = req.headers.authorization;
+    let token: string | null = null;
+    
+    if (authHeader?.startsWith("Bearer ")) {
+      token = authHeader.substring(7);
+    } else if (req.cookies?.token) {
+      token = req.cookies.token;
+    }
+    
+    if (!token) return null;
+    
+    // Decode JWT payload without verification (rate limiting doesn't need full verification)
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    
+    const payload = JSON.parse(Buffer.from(parts[1], "base64").toString());
+    return payload.sub || payload.userId || payload.user_id || null;
+  } catch {
+    return null;
+  }
+};
+
 const limiter = rateLimit({
   windowMs: parseInt(env.get("RATE_LIMIT_INTERVAL") || "5000"),
   max: parseInt(env.get("RATE_LIMIT") || "100"),
+  keyGenerator: (req) => {
+    // Use userId for authenticated requests if enabled, otherwise use IP
+    if (env.get("RATE_LIMIT_BY_USER") === "true") {
+      const userId = extractUserIdFromToken(req);
+      if (userId) return `user:${userId}`;
+    }
+    return req.ip || "unknown";
+  },
   skip: (req, res) => {
     return req.path.startsWith("/admin") || req.path === "/admin";
   },
