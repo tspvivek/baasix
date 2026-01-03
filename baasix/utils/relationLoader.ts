@@ -331,21 +331,27 @@ function processIncludeConfig(
     expandedAttributes.push(...allFields);
   }
 
-  // Create an alias for the target table using the relation name
+  // Create a unique alias for the target table
+  // For nested relations with same name (e.g., M2M junction.target where both named "chapters"),
+  // we need to include the parent path to avoid alias conflicts
+  // E.g., "chapters" vs "chapters__chapters" for nested same-name relations
+  const uniqueAlias = parentPath ? `${parentPath.replace(/\./g, '__')}__${config.relation}` : config.relation;
+  
+  // Create an alias for the target table using the unique alias
   // This allows joining the same table multiple times with different aliases
-  const aliasedTable = alias(targetTable as any, config.relation);
+  const aliasedTable = alias(targetTable as any, uniqueAlias);
 
   // Build join condition based on relation type
   // Use sourceAlias (if provided) for JOIN SQL, otherwise use sourceTableName
   // This is critical for nested relations where the parent is aliased
-  const joinCondition = buildJoinCondition(association, sourceAlias || sourceTableName, config.relation);
+  const joinCondition = buildJoinCondition(association, sourceAlias || sourceTableName, uniqueAlias);
   
   // Process where clause
-  // Use relation name as tableName for proper alias resolution
+  // Use unique alias as tableName for proper alias resolution
   let whereClause: SQL | undefined;
   if (config.where) {
     whereClause = drizzleWhere(config.where, {
-      tableName: config.relation,
+      tableName: uniqueAlias,
       schema: aliasedTable
     });
   }
@@ -358,7 +364,7 @@ function processIncludeConfig(
         nestedConfig,
         association.model,
         parentPath ? `${parentPath}.${config.relation}` : config.relation,
-        config.relation // Pass current relation name as the source alias for nested includes
+        uniqueAlias // Pass unique alias as the source alias for nested includes
       );
       if (processedNested) {
         nested.push(processedNested);
@@ -380,7 +386,8 @@ function processIncludeConfig(
     attributes: expandedAttributes,
     nested,
     required: config.required || false,
-    separate
+    separate,
+    alias: uniqueAlias // Store the unique alias for use in queries
   };
 }
 
@@ -562,10 +569,11 @@ export async function loadHasManyRelations(
 
       if (isFilterObject) {
         // It's a FilterObject from relConditions - build SQL for target table
+        // Use include.alias if available for proper table alias reference in SQL
         const filterJoins: any[] = [];
         const rebuiltWhere = drizzleWhere(include.where as FilterObject, {
           table: targetTable,
-          tableName: association.model,
+          tableName: include.alias || association.model,
           schema: targetTable as any,
           joins: filterJoins
         });
@@ -705,10 +713,11 @@ async function loadNestedRelationsForHasMany(
 
         if (isFilterObject) {
           // It's a FilterObject from relConditions - build SQL for target table
+          // Use include.alias if available for proper table alias reference in SQL
           const filterJoins: any[] = [];
           const rebuiltWhere = drizzleWhere(include.where as FilterObject, {
             table: targetTable,
-            tableName: association.model,
+            tableName: include.alias || association.model,
             schema: targetTable as any,
             joins: filterJoins
           });
