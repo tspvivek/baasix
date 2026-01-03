@@ -55,17 +55,33 @@ class ReportService {
 
     // Step 2: Get related data using ItemsService with dot notation
     // Extract the groupBy field values to filter by
-    const groupByField = groupBy[0]; // Assuming single groupBy field for now
+    // Find the first non-date groupBy field to use for filtering/merging
+    const groupByField = groupBy.find(field => !field.startsWith('date:')) || groupBy[0];
+    
+    // Check if groupByField is a virtual date field (can't be used as filter)
+    const isDateField = groupByField.startsWith('date:');
+    
     const groupByValues = aggregatedResult.data.map((row: any) => row[groupByField]).filter((val: any) => val != null);
 
     if (groupByValues.length === 0) {
       return aggregatedResult;
     }
 
+    // Ensure groupBy field is included in fields for proper merging
+    // This is needed because the merge logic relies on groupByField to match records
+    // Don't add virtual date fields (date:year:, date:month:, etc.) as they're not real columns
+    const step2Fields = [...fields];
+    if (!isDateField && !step2Fields.includes(groupByField) && !step2Fields.includes("*")) {
+      step2Fields.push(groupByField);
+    }
+
+    // Filter out any date: prefixed fields from step2Fields as they can't be selected directly
+    const cleanedStep2Fields = step2Fields.filter(field => !field.startsWith('date:'));
+
     // Query with relational fields using dot notation
     const step2Query: ReportQuery = {
-      fields: fields, // Use the original fields which may contain dot notation
-      filter: {
+      fields: cleanedStep2Fields, // Use the original fields + groupBy field for merging (minus date fields)
+      filter: isDateField ? filter : {
         ...filter,
         [groupByField]: { in: groupByValues },
       },
