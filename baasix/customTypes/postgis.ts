@@ -64,8 +64,9 @@ function parseWKB(wkbHex: unknown): any {
     const readPoint = (): [number, number] => {
       const x = readDouble();
       const y = readDouble();
-      // Swap coordinates: data is often stored as [lat, lng] but GeoJSON expects [lng, lat]
-      return [y, x];
+      // PostGIS WKB stores as [x, y] which is [longitude, latitude]
+      // GeoJSON also expects [longitude, latitude], so no swap needed
+      return [x, y];
     };
     
     const readLinearRing = (): [number, number][] => {
