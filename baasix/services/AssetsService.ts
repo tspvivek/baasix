@@ -52,6 +52,7 @@ class AssetsService extends FilesService {
     if (file.type.startsWith("image/")) {
       const cacheKey = this.getCacheKey(id, query);
       const cachedPath = path.join(this.cacheDir, cacheKey);
+      const hasTransformParams = query.width || query.height || query.quality;
 
       if (
         await fs.promises
@@ -60,6 +61,18 @@ class AssetsService extends FilesService {
           .catch(() => false)
       ) {
         const result = await this.getOriginalFile(cachedPath);
+        // For transformed images (resize/quality), use image/jpeg since sharp outputs jpeg
+        // For original images (no transform params), use the stored file type
+        result.contentType = hasTransformParams ? "image/jpeg" : (file.type || result.contentType);
+        result.file = file;
+        result.isS3 = isS3;
+        return result;
+      }
+
+      // If no transform params, return the original image with correct content type
+      if (!hasTransformParams) {
+        const result = await this.getOriginalFile(filePath);
+        result.contentType = file.type || result.contentType;
         result.file = file;
         result.isS3 = isS3;
         return result;
@@ -78,6 +91,9 @@ class AssetsService extends FilesService {
       return processedImage as any;
     } else {
       const result = await this.getOriginalFile(filePath);
+      // Use the stored file type from database instead of detecting from path
+      // This ensures correct content-type even when filename has no extension
+      result.contentType = file.type || result.contentType;
       // Include file path for video/audio files to support range requests
       if (file.type.startsWith("video/") || file.type.startsWith("audio/")) {
         result.filePath = filePath;
@@ -105,7 +121,15 @@ class AssetsService extends FilesService {
   }
 
   getCacheKey(id: string | number, query: AssetQuery): string {
-    const queryString = JSON.stringify(query);
+    // Only include resize-related parameters in cache key (exclude access_token, etc.)
+    const cacheParams = {
+      width: query.width,
+      height: query.height,
+      fit: query.fit,
+      quality: query.quality,
+      withoutEnlargement: query.withoutEnlargement,
+    };
+    const queryString = JSON.stringify(cacheParams);
     return crypto.createHash("md5").update(`${id}-${queryString}`).digest("hex") + ".jpg";
   }
 
