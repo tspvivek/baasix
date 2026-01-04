@@ -411,6 +411,12 @@ export class ItemsService {
     // Validate tenant context
     await validateTenantContext(data, this);
 
+    // For baasix_User, tenant_Id is not set directly on the user record
+    // (users are associated with tenants via userRoles.tenant_Id)
+    if (this.collection === 'baasix_User') {
+      return data;
+    }
+
     // Enforce tenant_Id
     return {
       ...data,

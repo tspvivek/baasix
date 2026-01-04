@@ -284,6 +284,7 @@ export interface AuthAdapter {
   // Verification operations
   createVerification(verification: Omit<Verification, "id" | "createdAt" | "updatedAt">): Promise<Verification>;
   findVerificationByIdentifier(identifier: string): Promise<Verification | null>;
+  updateVerificationByIdentifier(identifier: string, data: Partial<Verification>): Promise<void>;
   deleteVerification(verificationId: string): Promise<void>;
   deleteVerificationByIdentifier(identifier: string): Promise<void>;
   

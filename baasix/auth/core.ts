@@ -87,6 +87,7 @@ export interface BaasixAuth {
   
   // Magic Link
   createMagicLink(email: string): Promise<{ token: string; expiresAt: Date }>;
+  updateMagicLinkToken(email: string, newToken: string): Promise<void>;
   verifyMagicLink(token: string): Promise<AuthResponse | null>;
   
   // Password Reset
@@ -665,6 +666,11 @@ export function createAuth(options: AuthOptions): BaasixAuth {
     // Create Magic Link
     async createMagicLink(email) {
       return verificationService.createMagicLink(email);
+    },
+    
+    // Update Magic Link Token (for code mode)
+    async updateMagicLinkToken(email, newToken) {
+      return verificationService.updateMagicLinkToken(email, newToken);
     },
     
     // Verify Magic Link

@@ -523,12 +523,17 @@ export function createAuthRoutes(app: Express, options: AuthRouteOptions): Baasi
             },
           });
         } else if (mode === "code") {
+          // For code mode, generate a short code and store it separately
+          const code = token.substring(0, 12).toUpperCase();
+          // Update the verification to store the code as the value
+          await auth.updateMagicLinkToken(email, code);
+          
           await options.mailService.sendMail({
             to: email,
             subject: "Sign in to Your App",
             templateName: "magicLinkCode",
             context: {
-              code: token.substring(0, 12).toUpperCase(),
+              code,
               name: user.firstName || user.email,
             },
           });

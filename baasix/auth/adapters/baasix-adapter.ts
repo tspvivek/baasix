@@ -237,6 +237,17 @@ export function createBaasixAdapter(): AuthAdapter {
       }
     },
 
+    async updateVerificationByIdentifier(identifier, data) {
+      const service = await getService("baasix_Verification");
+      const result = await service.readByQuery({
+        filter: { identifier: { eq: identifier } },
+        limit: 1,
+      });
+      if (result.data?.[0]) {
+        await service.updateOne(result.data[0].id, data);
+      }
+    },
+
     // ==================== Role Operations ====================
 
     async findRoleByName(name) {

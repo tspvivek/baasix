@@ -67,6 +67,11 @@ export interface VerificationService {
   createMagicLink(email: string): Promise<{ token: string; expiresAt: Date }>;
   
   /**
+   * Update a magic link token value (for code mode)
+   */
+  updateMagicLinkToken(email: string, newToken: string): Promise<void>;
+  
+  /**
    * Verify a magic link token
    */
   verifyMagicLink(token: string): Promise<string | null>;
@@ -197,6 +202,11 @@ export function createVerificationService(
       });
       
       return { token, expiresAt };
+    },
+
+    async updateMagicLinkToken(email, newToken) {
+      const identifier = getIdentifier("magic-link", email);
+      await adapter.updateVerificationByIdentifier(identifier, { value: newToken });
     },
 
     async verifyMagicLink(token) {
