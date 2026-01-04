@@ -146,8 +146,12 @@ const registerEndpoint = (app: Express) => {
         return `attachment; filename="${encodedFilename}"; filename*=UTF-8''${encodedFilename}`;
       };
 
-      // For S3 files, handle secure proxy or direct redirect based on configuration
-      if (isS3 && !isDownload) {
+      // Check if transform params were requested (resize, quality)
+      const hasTransformParams = req.query.width || req.query.height || req.query.quality;
+
+      // For S3 files WITHOUT transform params, handle secure proxy or direct redirect
+      // If transform params exist, we use the processed buffer from getAsset() instead
+      if (isS3 && !isDownload && !hasTransformParams) {
         try {
           const provider = (assetService as any).storageService.getProvider(file.storage);
 
@@ -195,8 +199,10 @@ const registerEndpoint = (app: Express) => {
             });
 
             // Forward S3 response headers
+            // Use our contentType (from database) instead of S3's content-type
+            // S3 may have octet-stream if file was uploaded without extension
             res.set({
-              "Content-Type": s3Response.headers["content-type"] || contentType,
+              "Content-Type": contentType,
               "Content-Length": s3Response.headers["content-length"],
               "Accept-Ranges": "bytes",
               "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -241,7 +247,8 @@ const registerEndpoint = (app: Express) => {
           
           // Use res.attachment() which properly sets Content-Disposition
           res.attachment(downloadFilename);
-          res.setHeader("Content-Type", s3Response.headers["content-type"] || contentType);
+          // Use our contentType (from database) instead of S3's content-type
+          res.setHeader("Content-Type", contentType);
           res.setHeader("Content-Length", s3Response.headers["content-length"]);
 
           s3Response.data.pipe(res);

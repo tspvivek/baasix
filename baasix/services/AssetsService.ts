@@ -9,21 +9,19 @@ import type { AssetQuery, AssetResult, ProcessedImage } from '../types/index.js'
 import { getProjectPath } from "../utils/dirname.js";
 
 class AssetsService extends FilesService {
-  private cacheDir: string;
-  private maxCacheSize: number;
+  private assetTempDir: string;
   private itemsService: ItemsService;
 
   constructor(params: { accountability?: any } = {}) {
     const { accountability } = params;
     super({ accountability });
     
-    this.cacheDir = env.get("ASSET_CACHE_DIR") || getProjectPath("asset-cache");
-    if (!fs.existsSync(this.cacheDir)) {
-      fs.mkdirSync(this.cacheDir, { recursive: true });
+    // Temp directory for S3 file processing (not for caching)
+    this.assetTempDir = env.get("ASSET_TEMP_DIR") || getProjectPath("asset-temp");
+    if (!fs.existsSync(this.assetTempDir)) {
+      fs.mkdirSync(this.assetTempDir, { recursive: true });
     }
     
-    // Convert GB to bytes, default to 1GB if not set
-    this.maxCacheSize = (parseFloat(env.get("ASSET_CACHE_SIZE_GB") || "1")) * 1024 * 1024 * 1024;
     this.itemsService = new ItemsService("baasix_File", { accountability });
   }
 
@@ -46,82 +44,105 @@ class AssetsService extends FilesService {
       };
     }
 
-    const filePath = await this.getFilePath(file);
     const { width, height, fit, quality, withoutEnlargement } = query;
+    const hasTransformParams = width || height || quality;
 
-    if (file.type.startsWith("image/")) {
-      const cacheKey = this.getCacheKey(id, query);
-      const cachedPath = path.join(this.cacheDir, cacheKey);
-      const hasTransformParams = query.width || query.height || query.quality;
+    // Get content type with fallback
+    const fileContentType = file.type || await this.getFileType(file.filename) || "application/octet-stream";
 
-      if (
-        await fs.promises
-          .access(cachedPath)
-          .then(() => true)
-          .catch(() => false)
-      ) {
-        const result = await this.getOriginalFile(cachedPath);
-        // For transformed images (resize/quality), use image/jpeg since sharp outputs jpeg
-        // For original images (no transform params), use the stored file type
-        result.contentType = hasTransformParams ? "image/jpeg" : (file.type || result.contentType);
-        result.file = file;
-        result.isS3 = isS3;
-        return result;
-      }
-
-      // If no transform params, return the original image with correct content type
+    if (fileContentType.startsWith("image/")) {
+      // If no transform params, return the original image
       if (!hasTransformParams) {
-        const result = await this.getOriginalFile(filePath);
-        result.contentType = file.type || result.contentType;
-        result.file = file;
-        result.isS3 = isS3;
-        return result;
+        const buffer = await this.getFileBuffer(file, provider, isS3);
+        return {
+          buffer,
+          contentType: fileContentType,
+          filePath: null,
+          file: file,
+          isS3: isS3
+        };
       }
 
-      const processedImage = await this.processImage(filePath, {
+      // Generate processed filename to store alongside original
+      const processedFilename = this.getProcessedFilename(file.filename, query);
+      
+      // Check if processed version exists in storage
+      const processedBuffer = await this.getProcessedFromStorage(provider, processedFilename, isS3);
+      
+      if (processedBuffer) {
+        // Processed version exists, return it
+        return {
+          buffer: processedBuffer,
+          contentType: "image/jpeg",
+          filePath: null,
+          file: file,
+          isS3: isS3
+        };
+      }
+
+      // Process the image and store it
+      const originalBuffer = await this.getFileBuffer(file, provider, isS3);
+      const processedImage = await this.processImageBuffer(originalBuffer, {
         width,
         height,
         fit,
         quality,
         withoutEnlargement,
       });
-      await this.saveToCache(processedImage.buffer, cacheKey);
-      (processedImage as any).file = file;
-      (processedImage as any).isS3 = isS3;
-      return processedImage as any;
+
+      // Save processed image to the same storage adapter
+      await this.saveProcessedToStorage(provider, processedFilename, processedImage.buffer);
+
+      return {
+        buffer: processedImage.buffer,
+        contentType: "image/jpeg",
+        filePath: null,
+        file: file,
+        isS3: isS3
+      };
     } else {
-      const result = await this.getOriginalFile(filePath);
-      // Use the stored file type from database instead of detecting from path
-      // This ensures correct content-type even when filename has no extension
-      result.contentType = file.type || result.contentType;
-      // Include file path for video/audio files to support range requests
-      if (file.type.startsWith("video/") || file.type.startsWith("audio/")) {
-        result.filePath = filePath;
+      // Non-image files
+      const buffer = await this.getFileBuffer(file, provider, isS3);
+      let filePath = null;
+      
+      // For video/audio files with local storage, provide file path for range requests
+      if ((fileContentType.startsWith("video/") || fileContentType.startsWith("audio/")) && !isS3) {
+        filePath = path.join(provider.basePath, file.filename);
       }
-      result.file = file;
-      result.isS3 = isS3;
-      return result;
+      
+      return {
+        buffer,
+        contentType: fileContentType,
+        filePath,
+        file: file,
+        isS3: isS3
+      };
     }
   }
 
-  async getFilePath(file: any): Promise<string> {
-    const provider = this.storageService.getProvider(file.storage);
-
-    if (provider.driver === "LOCAL") {
-      return path.join(provider.basePath, file.filename);
-    } else if (provider.driver === "S3") {
-      // For S3, we need to download the file to a temporary location
-      const tempFilePath = path.join(this.cacheDir, `temp_${file.filename}`);
-      const fileContent = await provider.getFile(file.filename);
-      await fs.promises.writeFile(tempFilePath, fileContent);
-      return tempFilePath;
+  /**
+   * Get file buffer from storage (works for both LOCAL and S3)
+   */
+  private async getFileBuffer(file: any, provider: any, isS3: boolean): Promise<Buffer> {
+    if (isS3) {
+      const stream = await provider.getFile(file.filename);
+      // Convert stream to buffer
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of stream) {
+        chunks.push(chunk);
+      }
+      return Buffer.concat(chunks);
     } else {
-      throw new Error(`Unsupported storage driver: ${provider.driver}`);
+      const filePath = path.join(provider.basePath, file.filename);
+      return fs.promises.readFile(filePath);
     }
   }
 
-  getCacheKey(id: string | number, query: AssetQuery): string {
-    // Only include resize-related parameters in cache key (exclude access_token, etc.)
+  /**
+   * Generate a filename for processed/resized images
+   * Format: {originalName}_processed_{hash}.jpg
+   */
+  getProcessedFilename(originalFilename: string, query: AssetQuery): string {
     const cacheParams = {
       width: query.width,
       height: query.height,
@@ -129,59 +150,62 @@ class AssetsService extends FilesService {
       quality: query.quality,
       withoutEnlargement: query.withoutEnlargement,
     };
-    const queryString = JSON.stringify(cacheParams);
-    return crypto.createHash("md5").update(`${id}-${queryString}`).digest("hex") + ".jpg";
+    const hash = crypto.createHash("md5").update(JSON.stringify(cacheParams)).digest("hex").substring(0, 8);
+    const ext = path.extname(originalFilename);
+    const baseName = path.basename(originalFilename, ext);
+    return `${baseName}_processed_${hash}.jpg`;
   }
 
-  async saveToCache(buffer: Buffer, cacheKey: string): Promise<void> {
-    await this.ensureCacheSizeLimit();
-    const cachedPath = path.join(this.cacheDir, cacheKey);
-    await fs.promises.writeFile(cachedPath, buffer);
-  }
-
-  async ensureCacheSizeLimit(): Promise<void> {
-    const currentSize = await this.getCacheSize();
-    if (currentSize > this.maxCacheSize) {
-      await this.deleteOldestCacheFiles(currentSize - this.maxCacheSize);
+  /**
+   * Try to get a processed image from storage
+   * Returns null if not found
+   */
+  private async getProcessedFromStorage(provider: any, filename: string, isS3: boolean): Promise<Buffer | null> {
+    try {
+      if (isS3) {
+        const stream = await provider.getFile(filename);
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of stream) {
+          chunks.push(chunk);
+        }
+        return Buffer.concat(chunks);
+      } else {
+        const filePath = path.join(provider.basePath, filename);
+        return await fs.promises.readFile(filePath);
+      }
+    } catch (error: any) {
+      // File doesn't exist
+      if (error.code === 'ENOENT' || error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
+        return null;
+      }
+      // For S3, check if it's a not found error
+      if (error.Code === 'NoSuchKey' || error.message?.includes('NoSuchKey')) {
+        return null;
+      }
+      throw error;
     }
   }
 
-  async getCacheSize(): Promise<number> {
-    const files = await fs.promises.readdir(this.cacheDir);
-    let totalSize = 0;
-    for (const file of files) {
-      const filePath = path.join(this.cacheDir, file);
-      const stats = await fs.promises.stat(filePath);
-      totalSize += stats.size;
-    }
-    return totalSize;
-  }
-
-  async deleteOldestCacheFiles(sizeToFree: number): Promise<void> {
-    const files = await fs.promises.readdir(this.cacheDir);
-    const fileStats = await Promise.all(
-      files.map(async (file) => {
-        const filePath = path.join(this.cacheDir, file);
-        const stats = await fs.promises.stat(filePath);
-        return { name: file, path: filePath, mtime: stats.mtime, size: stats.size };
-      })
-    );
-
-    fileStats.sort((a, b) => a.mtime.getTime() - b.mtime.getTime());
-
-    let freedSize = 0;
-    for (const file of fileStats) {
-      if (freedSize >= sizeToFree) break;
-      await fs.promises.unlink(file.path);
-      freedSize += file.size;
+  /**
+   * Save processed image to storage
+   */
+  private async saveProcessedToStorage(provider: any, filename: string, buffer: Buffer): Promise<void> {
+    try {
+      await provider.saveFile(filename, buffer);
+    } catch (error) {
+      // Log but don't fail - the image is still returned to user
+      console.error("Failed to save processed image to storage:", error);
     }
   }
 
-  async processImage(
-    filePath: string,
+  /**
+   * Process image from buffer instead of file path
+   */
+  async processImageBuffer(
+    inputBuffer: Buffer,
     { width, height, fit, quality, withoutEnlargement }: AssetQuery
   ): Promise<ProcessedImage> {
-    let image = sharp(filePath);
+    let image = sharp(inputBuffer);
 
     if (width || height) {
       const resizeOptions: any = {
@@ -193,27 +217,42 @@ class AssetsService extends FilesService {
       image = image.resize(resizeOptions);
     }
 
-    if (quality) {
-      image = image.jpeg({ quality: parseInt(quality.toString()) });
-    }
+    // Always convert to JPEG for processed images
+    const jpegQuality = quality ? parseInt(quality.toString()) : 80;
+    image = image.jpeg({ quality: jpegQuality });
 
     const buffer = await image.toBuffer();
     return { buffer, contentType: "image/jpeg" };
   }
 
-  async getOriginalFile(filePath: string): Promise<AssetResult> {
-    const buffer = await fs.promises.readFile(filePath);
-    const contentType = await this.getFileType(filePath);
-    return { buffer, contentType, file: null };
-  }
-
   /**
-   * Method to clear entire cache (optional, can be useful for maintenance)
+   * Delete processed versions of an image when the original is deleted
+   * This can be called from a hook when a file is deleted
    */
-  async clearCache(): Promise<void> {
-    const files = await fs.promises.readdir(this.cacheDir);
-    for (const file of files) {
-      await fs.promises.unlink(path.join(this.cacheDir, file));
+  async deleteProcessedVersions(file: any): Promise<void> {
+    if (!file.type?.startsWith("image/")) return;
+
+    const provider = this.storageService.getProvider(file.storage);
+    const isS3 = provider.driver === "S3";
+    const baseName = path.basename(file.filename, path.extname(file.filename));
+    const pattern = `${baseName}_processed_`;
+
+    try {
+      if (isS3) {
+        // For S3, we'd need to list objects with prefix - complex to implement
+        // Could be added later if needed
+        console.info("S3 processed version cleanup not implemented yet");
+      } else {
+        // For LOCAL storage, list directory and delete matching files
+        const files = await fs.promises.readdir(provider.basePath);
+        for (const f of files) {
+          if (f.startsWith(pattern)) {
+            await fs.promises.unlink(path.join(provider.basePath, f));
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Failed to delete processed versions:", error);
     }
   }
 }
