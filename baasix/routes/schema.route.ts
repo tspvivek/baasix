@@ -180,27 +180,33 @@ const registerEndpoint = (app: Express, context?: any) => {
 
     // Process schema to handle special flags like usertrack, sortEnabled
     function processSchemaFlags(schema, editMode = false) {
-        const processedSchema = { ...schema };
+        // Deep clone to avoid mutations
+        const processedSchema = JSON.parse(JSON.stringify(schema));
+        
+        // Ensure fields object exists
+        if (!processedSchema.fields) {
+            processedSchema.fields = {};
+        }
 
         // Handle usertrack flag
         if (processedSchema.usertrack === true) {
             const usertrack = {
-                userCreated_Id: { type: "UUID", SystemGenerated: "true" },
+                userCreated_Id: { type: "UUID", SystemGenerated: true },
                 userCreated: {
                     relType: "BelongsTo",
                     target: "baasix_User",
                     foreignKey: "userCreated_Id",
                     as: "userCreated",
-                    SystemGenerated: "true",
+                    SystemGenerated: true,
                     description: "M2O",
                 },
-                userUpdated_Id: { type: "UUID", SystemGenerated: "true" },
+                userUpdated_Id: { type: "UUID", SystemGenerated: true },
                 userUpdated: {
                     relType: "BelongsTo",
                     target: "baasix_User",
                     foreignKey: "userUpdated_Id",
                     as: "userUpdated",
-                    SystemGenerated: "true",
+                    SystemGenerated: true,
                     description: "M2O",
                 },
             };
@@ -237,19 +243,19 @@ const registerEndpoint = (app: Express, context?: any) => {
             if (processedSchema.timestamps === true) {
                 processedSchema.fields = {
                     ...processedSchema.fields,
-                    createdAt: { type: "DateTime", allowNull: true, SystemGenerated: true },
-                    updatedAt: { type: "DateTime", allowNull: true, SystemGenerated: true },
+                    createdAt: { type: "DateTime", allowNull: true, SystemGenerated: true, defaultValue: { type: "NOW" } },
+                    updatedAt: { type: "DateTime", allowNull: true, SystemGenerated: true, defaultValue: { type: "NOW" } },
                 };
-            } else {
-                // If timestamps are disabled, remove them from the schema
+            } else if (processedSchema.timestamps === false) {
+                // If timestamps are explicitly disabled, remove them from the schema
                 delete processedSchema.fields.createdAt;
                 delete processedSchema.fields.updatedAt;
             }
 
             // If paranoid is enabled, ensure it is not removed
             if (processedSchema.paranoid === true) {
-                processedSchema.fields.deletedAt = { type: "Date", allowNull: true, SystemGenerated: true };
-            } else {
+                processedSchema.fields.deletedAt = { type: "DateTime", allowNull: true, SystemGenerated: true, defaultValue: { type: "NOW" } };
+            } else if (processedSchema.paranoid === false) {
                 delete processedSchema.fields.deletedAt;
             }
         }
@@ -1437,37 +1443,63 @@ const registerEndpoint = (app: Express, context?: any) => {
         return true;
     }
 
+    // Helper function to normalize schema for comparison
+    // Removes SystemGenerated field as it's metadata that doesn't affect DB structure
+    function normalizeSchemaForComparison(schema: any): any {
+        if (!schema) return schema;
+        
+        const normalized = { ...schema };
+        
+        if (normalized.fields) {
+            normalized.fields = { ...normalized.fields };
+            for (const fieldName of Object.keys(normalized.fields)) {
+                const field = normalized.fields[fieldName];
+                if (field && typeof field === 'object') {
+                    // Create a copy without SystemGenerated for comparison
+                    const { SystemGenerated, ...fieldWithoutSystemGenerated } = field;
+                    normalized.fields[fieldName] = fieldWithoutSystemGenerated;
+                }
+            }
+        }
+        
+        return normalized;
+    }
+
     // Helper function to compare schemas
     function compareSchemas(currentSchema, newSchema) {
+        // Normalize both schemas before comparison
+        const normalizedCurrent = normalizeSchemaForComparison(currentSchema);
+        const normalizedNew = normalizeSchemaForComparison(newSchema);
+        
         const differences: any = {};
 
         // Compare fields
-        const allFields = new Set([...Object.keys(currentSchema.fields || {}), ...Object.keys(newSchema.fields || {})]);
+        const allFields = new Set([...Object.keys(normalizedCurrent.fields || {}), ...Object.keys(normalizedNew.fields || {})]);
 
         for (const field of allFields) {
-            if (!currentSchema.fields[field]) {
+            if (!normalizedCurrent.fields[field]) {
                 differences[field] = {
                     type: "added",
-                    details: newSchema.fields[field],
+                    details: normalizedNew.fields[field],
                 };
-            } else if (!newSchema.fields[field]) {
+            } else if (!normalizedNew.fields[field]) {
                 differences[field] = {
                     type: "removed",
-                    details: currentSchema.fields[field],
+                    details: normalizedCurrent.fields[field],
                 };
-            } else if (!deepEqual(currentSchema.fields[field], newSchema.fields[field])) {
+            } else if (!deepEqual(normalizedCurrent.fields[field], normalizedNew.fields[field])) {
                 differences[field] = {
                     type: "modified",
-                    from: currentSchema.fields[field],
-                    to: newSchema.fields[field],
+                    from: normalizedCurrent.fields[field],
+                    to: normalizedNew.fields[field],
                 };
             }
         }
 
         // Compare indexes
-        if (currentSchema.indexes || newSchema.indexes) {
-            const currentIndexes = currentSchema.indexes || [];
-            const newIndexes = newSchema.indexes || [];
+        if (normalizedCurrent.indexes || normalizedNew.indexes) {
+            const currentIndexes = normalizedCurrent.indexes || [];
+            const newIndexes = normalizedNew.indexes || [];
 
             if (!deepEqual(currentIndexes, newIndexes)) {
                 differences.indexes = {
@@ -1481,11 +1513,11 @@ const registerEndpoint = (app: Express, context?: any) => {
         // Compare other properties
         const schemaProps = ["timestamps", "paranoid", "name"];
         for (const prop of schemaProps) {
-            if (currentSchema[prop] !== newSchema[prop]) {
+            if (normalizedCurrent[prop] !== normalizedNew[prop]) {
                 differences[prop] = {
                     type: "modified",
-                    from: currentSchema[prop],
-                    to: newSchema[prop],
+                    from: normalizedCurrent[prop],
+                    to: normalizedNew[prop],
                 };
             }
         }

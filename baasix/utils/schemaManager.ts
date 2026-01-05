@@ -84,8 +84,8 @@ export class SchemaManager {
         console.info('No system schemas need syncing.');
       }
       
-      // Step 4: Load all schemas into memory
-      await this.loadAllSchemas();
+      // Step 4: Load all schemas into memory (pass needSyncing to skip unnecessary sync for unchanged schemas)
+      await this.loadAllSchemas(needSyncing);
 
       this.initialized = true;
       console.log('Schema Manager initialized successfully');
@@ -201,23 +201,30 @@ export class SchemaManager {
         console.log(`Added system schema: ${schemaData.collectionName}`);
         needUpdate.push(schemaData.collectionName);
       } else {
-        // Compare and update if needed (add new fields and sync schema-level properties)
+        // Compare and update if needed (add new fields, check modified fields, and sync schema-level properties)
         const existingSchema = existing[0].schema as any;
         let hasChanges = false;
 
-        // Check for new/missing fields (including timestamp fields)
-        const newFields = Object.keys(schemaToStore.fields).filter(
-          (field) => !existingSchema.fields[field]
-        );
-
-        if (newFields.length > 0) {
-          for (const field of newFields) {
-            existingSchema.fields[field] = schemaToStore.fields[field];
-          }
-          hasChanges = true;
+        // Ensure existingSchema.fields exists
+        if (!existingSchema.fields) {
+          existingSchema.fields = {};
         }
 
-        // Sync schema-level properties (timestamps, paranoid, usertrack, indexes)
+        // Helper function to normalize schema for comparison
+        // Removes SystemGenerated field which can differ between code ("true") and db (true)
+        const normalizeForComparison = (obj: any): any => {
+          if (obj === null || typeof obj !== 'object') return obj;
+          if (Array.isArray(obj)) {
+            return obj.map(normalizeForComparison);
+          }
+          const result: any = {};
+          for (const [key, value] of Object.entries(obj)) {
+            if (key === 'SystemGenerated') continue; // Skip this field for comparison
+            result[key] = normalizeForComparison(value);
+          }
+          return result;
+        };
+
         // Helper function for deep equality comparison (ignores property order)
         const deepEqual = (a: any, b: any): boolean => {
           if (a === b) return true;
@@ -244,18 +251,68 @@ export class SchemaManager {
           return keysA.every(key => deepEqual(a[key], b[key]));
         };
 
-        const schemaLevelProps = ['timestamps', 'paranoid', 'usertrack', 'indexes'];
-        for (const prop of schemaLevelProps) {
-          if (schemaToStore[prop] !== undefined && !deepEqual(existingSchema[prop], schemaToStore[prop])) {
-            existingSchema[prop] = schemaToStore[prop];
-            hasChanges = true;
-            console.log(`Updated ${prop} for ${schemaData.collectionName}`);
+        // Check for new fields (fields in system schema but not in DB)
+        const newFields = Object.keys(schemaToStore.fields || {}).filter(
+          (field) => !existingSchema.fields[field]
+        );
+
+        if (newFields.length > 0) {
+          for (const field of newFields) {
+            existingSchema.fields[field] = schemaToStore.fields[field];
+          }
+          hasChanges = true;
+          console.log(`[SCHEMA DIFF] ${schemaData.collectionName} new fields:`, newFields);
+        }
+
+        // Check for modified fields (existing fields with changed definitions)
+        const modifiedFields: string[] = [];
+        for (const fieldName of Object.keys(schemaToStore.fields || {})) {
+          if (existingSchema.fields[fieldName]) {
+            // Field exists in both - check if definition changed (normalize to ignore SystemGenerated differences)
+            const normalizedExisting = normalizeForComparison(existingSchema.fields[fieldName]);
+            const normalizedNew = normalizeForComparison(schemaToStore.fields[fieldName]);
+            if (!deepEqual(normalizedExisting, normalizedNew)) {
+              existingSchema.fields[fieldName] = schemaToStore.fields[fieldName];
+              modifiedFields.push(fieldName);
+              hasChanges = true;
+            }
           }
         }
 
-        // Log field differences
-        if (newFields.length > 0) {
-          console.log(`[SCHEMA DIFF] ${schemaData.collectionName} new fields:`, newFields);
+        if (modifiedFields.length > 0) {
+          console.log(`[SCHEMA DIFF] ${schemaData.collectionName} modified fields:`, modifiedFields);
+        }
+
+        // Note: We intentionally do NOT remove fields that exist in DB but not in system schema
+        // This preserves user data and allows for gradual migrations
+
+        // Sync structural schema-level properties (indexes, name) from system schema
+        // These are enforced from code and should not be user-modified
+        const structuralProps = ['indexes', 'name'];
+        for (const prop of structuralProps) {
+          // Normalize both values before comparison to ignore SystemGenerated differences
+          const normalizedExisting = normalizeForComparison(existingSchema[prop]);
+          const normalizedNew = normalizeForComparison(schemaToStore[prop]);
+          if (schemaToStore[prop] !== undefined && !deepEqual(normalizedExisting, normalizedNew)) {
+            console.log(`[SCHEMA DIFF] ${schemaData.collectionName} property '${prop}' differs:`, {
+              existing: existingSchema[prop],
+              new: schemaToStore[prop]
+            });
+            existingSchema[prop] = schemaToStore[prop];
+            hasChanges = true;
+          }
+        }
+
+        // User-configurable properties (timestamps, paranoid, usertrack, sortEnabled)
+        // Only set these if they don't exist in the DB yet - preserve user changes
+        const userConfigurableProps = ['timestamps', 'paranoid', 'usertrack', 'sortEnabled'];
+        for (const prop of userConfigurableProps) {
+          // Only set if the property doesn't exist in the existing schema (initial setup)
+          if (existingSchema[prop] === undefined && schemaToStore[prop] !== undefined) {
+            existingSchema[prop] = schemaToStore[prop];
+            hasChanges = true;
+            console.log(`Set initial ${prop} for ${schemaData.collectionName}`);
+          }
         }
 
         if (hasChanges) {
@@ -455,29 +512,61 @@ export class SchemaManager {
 
   /**
    * Load all schemas from database into memory
+   * @param schemasNeedingSync - List of schema names that need table sync (from ensureSystemSchemas)
+   *                             If empty, skip expensive sync operations for faster startup
    */
-  private async loadAllSchemas(): Promise<void> {
+  private async loadAllSchemas(schemasNeedingSync: string[] = []): Promise<void> {
     const db = getDatabase();
+    const sql = getSqlClient();
+    const needsSyncSet = new Set(schemasNeedingSync);
+    const skipSync = schemasNeedingSync.length === 0;
 
     const schemaDefinitions = await db
       .select()
       .from(baasixSchemaDefinition);
 
     console.log(`Found ${schemaDefinitions.length} schema definitions`);
+    
+    // Get list of existing tables in one query (for fast lookup)
+    const existingTables = await sql`
+      SELECT table_name FROM information_schema.tables 
+      WHERE table_schema = 'public'
+    `;
+    const existingTableSet = new Set(existingTables.map((t: any) => t.table_name));
+    
+    if (skipSync) {
+      console.log('No schema changes detected, using fast startup path');
+    }
 
     // Sort schemas by dependency order
     const sortedSchemas = this.sortSchemasByDependencies(schemaDefinitions);
 
+    // Schemas that need FK constraint sync (only those that were synced)
+    const schemasForFKSync: typeof sortedSchemas = [];
+
     // First pass: Create all tables and models without FK constraints
     for (const schemaDef of sortedSchemas) {
-      // Normalize legacy Sequelize schemas (add default values for timestamp fields)
-      const normalizedSchema = await this.normalizeLegacySchema(
-        schemaDef.collectionName,
-        schemaDef.schema as any
-      );
+      const tableExists = existingTableSet.has(schemaDef.collectionName);
       
-      // Update the schemaDef with normalized schema for subsequent operations
-      schemaDef.schema = normalizedSchema;
+      // Determine if this schema needs table sync:
+      // 1. If it was explicitly marked as needing sync
+      // 2. If the table doesn't exist yet (new schema)
+      // 3. If skipSync is false (there were schema changes, so sync all)
+      const needsSync = needsSyncSet.has(schemaDef.collectionName) || 
+                        !tableExists || 
+                        !skipSync;
+      
+      let normalizedSchema = schemaDef.schema as any;
+      
+      // Only run legacy normalization if sync is needed (skips DB queries on fast path)
+      if (needsSync) {
+        normalizedSchema = await this.normalizeLegacySchema(
+          schemaDef.collectionName,
+          schemaDef.schema as any
+        );
+        // Update the schemaDef with normalized schema for subsequent operations
+        schemaDef.schema = normalizedSchema;
+      }
       
       // Store JSON schema definition for later use (e.g., in getPrimaryKey)
       this.schemaDefinitions.set(schemaDef.collectionName, schemaDef);
@@ -487,18 +576,25 @@ export class SchemaManager {
         normalizedSchema
       );
 
-      // Create table if it doesn't exist (FK constraints will be added in second pass)
-      await this.createTableFromSchema(
-        schemaDef.collectionName,
-        normalizedSchema,
-        true
-      );
+      if (needsSync) {
+        // Create table if it doesn't exist (FK constraints will be added in second pass)
+        await this.createTableFromSchema(
+          schemaDef.collectionName,
+          normalizedSchema,
+          true
+        );
+        schemasForFKSync.push(schemaDef);
+      }
     }
 
-    // Second pass: Add foreign key constraints
-    console.log('Adding foreign key constraints...');
-    for (const schemaDef of sortedSchemas) {
-      await this.ensureForeignKeyConstraints(schemaDef.collectionName, schemaDef.schema as any);
+    // Second pass: Add foreign key constraints only for schemas that were synced
+    if (schemasForFKSync.length > 0) {
+      console.log(`Adding foreign key constraints for ${schemasForFKSync.length} schemas...`);
+      for (const schemaDef of schemasForFKSync) {
+        await this.ensureForeignKeyConstraints(schemaDef.collectionName, schemaDef.schema as any);
+      }
+    } else {
+      console.log('Skipping foreign key constraint check (no schemas need sync)');
     }
 
     // Check if we need to seed the database
@@ -1449,10 +1545,8 @@ export class SchemaManager {
         relationBuilder.storeAssociations(collectionName, associations);
       }
 
-      // Create indexes if specified
-      if (options?.indexes && options.indexes.length > 0) {
-        await this.createIndexes(collectionName, options.indexes);
-      }
+      // NOTE: Index creation is now handled in createTableFromSchema 
+      // to avoid DB queries during fast startup path
 
       // Register hooks if needed
       this.registerModelHooks(collectionName, jsonSchema);
