@@ -1,10 +1,24 @@
 import path from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 
 /**
  * Check if we're in CommonJS (Jest) or ESM mode
  */
 export const isCommonJS = typeof __dirname !== 'undefined';
+
+/**
+ * Convert a file path to a URL that can be used with dynamic import()
+ * This is necessary on Windows where absolute paths like "E:\path\to\file"
+ * are not valid URLs and need to be converted to "file:///E:/path/to/file"
+ */
+export function toFileURL(filePath: string): string {
+  // If already a URL, return as-is
+  if (filePath.startsWith('file://')) {
+    return filePath;
+  }
+  // Convert to file:// URL for cross-platform compatibility
+  return pathToFileURL(filePath).href;
+}
 
 // Cache the baasix root to avoid repeated computation
 let cachedBaasixRoot: string | null = null;

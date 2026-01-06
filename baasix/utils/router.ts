@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { Express } from "express";
 import type { RouteContext } from '../types/index.js';
-import { getBaasixPath, getProjectPath } from "./dirname.js";
+import { getBaasixPath, getProjectPath, toFileURL } from "./dirname.js";
 
 export const loadRoutes = async (app: Express, context: RouteContext): Promise<void> => {
   // Extensions are in the user's project directory
@@ -23,7 +23,8 @@ export const loadRoutes = async (app: Express, context: RouteContext): Promise<v
       if (fs.existsSync(indexPath)) {
         try {
           // Use dynamic import for ES modules
-          const routeModule = await import(indexPath);
+          // Convert to file:// URL for Windows compatibility
+          const routeModule = await import(toFileURL(indexPath));
 
           if (routeModule && typeof routeModule.default === "object") {
             routeModule.default.handler(app, context);

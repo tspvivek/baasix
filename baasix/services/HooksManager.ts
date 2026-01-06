@@ -4,7 +4,7 @@ import { db, getDatabase } from '../utils/db.js';
 import { sql } from 'drizzle-orm';
 import { schemaManager } from '../utils/schemaManager.js';
 import type { HookContext, HookFunction } from '../types/index.js';
-import { getProjectPath } from '../utils/dirname.js';
+import { getProjectPath, toFileURL } from '../utils/dirname.js';
 
 // Re-export types for backward compatibility
 export type { HookContext, HookFunction };
@@ -174,7 +174,8 @@ export class HooksManager {
         if (fs.existsSync(hookFile)) {
           try {
             // Dynamic import for ES modules
-            const hookModule = await import(hookFile);
+            // Convert to file:// URL for Windows compatibility
+            const hookModule = await import(toFileURL(hookFile));
 
             if (typeof hookModule.default === 'function') {
               await hookModule.default(this, context);
@@ -212,7 +213,8 @@ export class HooksManager {
         if (fs.existsSync(scheduleFile)) {
           try {
             // Dynamic import for ES modules
-            const scheduleModule = await import(scheduleFile);
+            // Convert to file:// URL for Windows compatibility
+            const scheduleModule = await import(toFileURL(scheduleFile));
 
             if (typeof scheduleModule.default === 'function') {
               await scheduleModule.default(schedule, context);

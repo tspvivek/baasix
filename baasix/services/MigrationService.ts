@@ -5,7 +5,7 @@ import path from "path";
 import fs from "fs/promises";
 import crypto from "crypto";
 import env from "../utils/env.js";
-import { getBaasixPath, getProjectPath } from "../utils/dirname.js";
+import { getBaasixPath, getProjectPath, toFileURL } from "../utils/dirname.js";
 
 /**
  * Migration status enum
@@ -349,7 +349,8 @@ class MigrationService {
       for (const file of migrationFiles) {
         try {
           const filePath = path.join(dir, file);
-          const module = await import(filePath);
+          // Convert to file:// URL for Windows compatibility
+          const module = await import(toFileURL(filePath));
           
           // Support both default export and named export
           const migration = module.default || module.migration || module;

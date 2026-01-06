@@ -331,6 +331,12 @@ function processIncludeConfig(
     expandedAttributes.push(...allFields);
   }
 
+  // Always ensure 'id' is included in attributes for relational queries
+  // This prevents SQL errors when joining/grouping by related records
+  if (expandedAttributes.length > 0 && !expandedAttributes.includes('id') && targetTable['id']) {
+    expandedAttributes.unshift('id');
+  }
+
   // Create a unique alias for the target table
   // For nested relations with same name (e.g., M2M junction.target where both named "chapters"),
   // we need to include the parent path to avoid alias conflicts
@@ -624,6 +630,11 @@ export async function loadHasManyRelations(
       selectColumns[foreignKey] = targetTable[foreignKey];
     }
 
+    // Always include 'id' for nested relations and proper record matching
+    if (!selectColumns['id'] && targetTable['id']) {
+      selectColumns['id'] = targetTable['id'];
+    }
+
     // Execute query with specific columns or all columns
     const relatedRecords = await db
       .select(Object.keys(selectColumns).length > 0 ? selectColumns : undefined)
@@ -750,6 +761,11 @@ async function loadNestedRelationsForHasMany(
       // Always include the targetKey so we can match records
       if (!selectColumns[targetKey] && targetTable[targetKey]) {
         selectColumns[targetKey] = targetTable[targetKey];
+      }
+
+      // Always include 'id' for nested relations and proper record matching
+      if (!selectColumns['id'] && targetTable['id']) {
+        selectColumns['id'] = targetTable['id'];
       }
 
       // Execute query with specific columns or all columns

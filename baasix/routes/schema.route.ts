@@ -81,7 +81,7 @@ const registerEndpoint = (app: Express, context?: any) => {
             const { search, page, limit, sort = "collectionName:asc" } = req.query as any;
 
             // Default to public access (backwards compatible), set SCHEMAS_PUBLIC=false for production
-            const isPublic = process.env.SCHEMAS_PUBLIC !== 'false';
+            const bypassPermissions = process.env.SCHEMAS_PUBLIC !== 'false';
 
             // Use ItemsService - bypasses permission if public, otherwise checks permission
             const schemaService = new ItemsService('baasix_SchemaDefinition', {
@@ -108,7 +108,7 @@ const registerEndpoint = (app: Express, context?: any) => {
                 query.limit = parseInt(limit || 50, 10);
             }
 
-            const result = await schemaService.readByQuery(query, isPublic);
+            const result = await schemaService.readByQuery(query, bypassPermissions);
             
             // Transform to expected format
             const schemas = result.data.map((item: any) => ({
@@ -151,7 +151,7 @@ const registerEndpoint = (app: Express, context?: any) => {
     app.get("/schemas/:collectionName", async (req, res, next) => {
         try {
             // Default to public access (backwards compatible), set SCHEMAS_PUBLIC=false for production
-            const isPublic = process.env.SCHEMAS_PUBLIC !== 'false';
+            const bypassPermissions = process.env.SCHEMAS_PUBLIC !== 'false';
 
             // Use ItemsService - bypasses permission if public, otherwise checks permission
             const schemaService = new ItemsService('baasix_SchemaDefinition', {
@@ -162,7 +162,7 @@ const registerEndpoint = (app: Express, context?: any) => {
                 filter: { collectionName: { eq: req.params.collectionName } },
                 limit: 1,
                 fields: ['collectionName', 'schema']
-            }, isPublic);
+            }, bypassPermissions);
 
             if (!result.data || result.data.length === 0) {
                 throw new APIError("Schema not found", 404);
