@@ -71,106 +71,107 @@ const registerEndpoint = (app: Express, context?: any) => {
     }
 
     // Get all schemas
+    // Access controlled by SCHEMAS_PUBLIC env variable:
+    // - true (default): Bypass permission check (for development/CLI)
+    // - false: Requires permission on baasix_SchemaDefinition (production)
+    // Admins always have access via ItemsService
     app.get("/schemas", async (req, res, next) => {
         try {
             console.log('[schema.route] GET /schemas called');
             const { search, page, limit, sort = "collectionName:asc" } = req.query as any;
 
-            // Query baasix_SchemaDefinition table for JSON schemas
-            console.log('[schema.route] Querying baasix_SchemaDefinition table');
-            const schemaDefTable = schemaManager.getTable("baasix_SchemaDefinition");
-            const schemaDefinitions = await db.select().from(schemaDefTable);
+            // Default to public access (backwards compatible), set SCHEMAS_PUBLIC=false for production
+            const isPublic = process.env.SCHEMAS_PUBLIC !== 'false';
 
-            console.log('[schema.route] Found schemas:', schemaDefinitions.length);
-
-            // Convert to the expected format
-            const allSchemas = schemaDefinitions.map((schemaDef: any) => ({
-                collectionName: schemaDef.collectionName,
-                schema: schemaDef.schema
-            }));
-            console.log('[schema.route] Converted to array, length:', allSchemas.length);
-
-            // Filter by search if provided
-            let filteredSchemas = allSchemas;
-            if (search) {
-                const searchLower = (search as string).toLowerCase();
-                filteredSchemas = allSchemas.filter((item: any) =>
-                    item.collectionName?.toLowerCase().includes(searchLower) ||
-                    item.schema?.name?.toLowerCase().includes(searchLower)
-                );
-            }
-
-            // Apply sorting
-            const [sortField, sortDirection] = (typeof sort === 'string' ? sort.split(':') : ['collectionName', 'asc']);
-            filteredSchemas.sort((a: any, b: any) => {
-                const aVal = a[sortField] || '';
-                const bVal = b[sortField] || '';
-                const comparison = aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
-                return sortDirection?.toUpperCase() === 'DESC' ? -comparison : comparison;
+            // Use ItemsService - bypasses permission if public, otherwise checks permission
+            const schemaService = new ItemsService('baasix_SchemaDefinition', {
+                accountability: req.accountability as any
             });
 
-            // Check if pagination parameters are provided
-            const shouldPaginate = page !== undefined || limit !== undefined;
+            const query: any = {
+                fields: ['collectionName', 'schema']
+            };
 
-            if (shouldPaginate) {
-                // Parse pagination parameters
+            // Only add sort if provided and not the default format that causes parsing issues
+            if (sort && typeof sort === 'string' && sort.includes(':')) {
+                const [field, direction] = sort.split(':');
+                query.sort = [direction?.toLowerCase() === 'desc' ? `-${field}` : field];
+            }
+
+            if (search) {
+                query.search = search;
+                query.searchFields = ['collectionName'];
+            }
+
+            if (page !== undefined || limit !== undefined) {
+                query.page = parseInt(page || 1, 10);
+                query.limit = parseInt(limit || 50, 10);
+            }
+
+            const result = await schemaService.readByQuery(query, isPublic);
+            
+            // Transform to expected format
+            const schemas = result.data.map((item: any) => ({
+                collectionName: item.collectionName,
+                schema: item.schema
+            }));
+
+            if (page !== undefined || limit !== undefined) {
                 const pageNum = parseInt(page || 1, 10);
                 const limitNum = parseInt(limit || 50, 10);
-                const offset = (pageNum - 1) * limitNum;
-
-                const totalCount = filteredSchemas.length;
-                const paginatedSchemas = filteredSchemas.slice(offset, offset + limitNum);
-
-                // Calculate pagination info
-                const totalPages = Math.ceil(totalCount / limitNum);
-                const hasNextPage = pageNum < totalPages;
-                const hasPrevPage = pageNum > 1;
-
-                res.status(200).json({
-                    data: paginatedSchemas,
-                    totalCount,
+                const totalPages = Math.ceil((result.totalCount || 0) / limitNum);
+                
+                return res.status(200).json({
+                    data: schemas,
+                    totalCount: result.totalCount || schemas.length,
                     pagination: {
                         currentPage: pageNum,
                         totalPages,
                         limit: limitNum,
-                        hasNextPage,
-                        hasPrevPage,
-                        nextPage: hasNextPage ? pageNum + 1 : null,
-                        prevPage: hasPrevPage ? pageNum - 1 : null
+                        hasNextPage: pageNum < totalPages,
+                        hasPrevPage: pageNum > 1,
+                        nextPage: pageNum < totalPages ? pageNum + 1 : null,
+                        prevPage: pageNum > 1 ? pageNum - 1 : null
                     }
                 });
-            } else {
-                res.status(200).json({
-                    data: filteredSchemas,
-                    totalCount: filteredSchemas.length
-                });
             }
+
+            return res.status(200).json({
+                data: schemas,
+                totalCount: schemas.length
+            });
         } catch (error: any) {
             console.error('[schema.route] Error in GET /schemas:', error);
-            next(new APIError("Error retrieving schemas", 500, error.message));
+            next(error);
         }
     });
 
     // Get a specific schema
+    // Access controlled same as GET /schemas
     app.get("/schemas/:collectionName", async (req, res, next) => {
         try {
-            const schemaDefTable = schemaManager.getTable("baasix_SchemaDefinition");
-            const schemaRecords = await db
-                .select()
-                .from(schemaDefTable)
-                .where(eq(schemaDefTable.collectionName, req.params.collectionName))
-                .limit(1);
+            // Default to public access (backwards compatible), set SCHEMAS_PUBLIC=false for production
+            const isPublic = process.env.SCHEMAS_PUBLIC !== 'false';
 
-            if (!schemaRecords || schemaRecords.length === 0) {
+            // Use ItemsService - bypasses permission if public, otherwise checks permission
+            const schemaService = new ItemsService('baasix_SchemaDefinition', {
+                accountability: req.accountability as any
+            });
+
+            const result = await schemaService.readByQuery({
+                filter: { collectionName: { eq: req.params.collectionName } },
+                limit: 1,
+                fields: ['collectionName', 'schema']
+            }, isPublic);
+
+            if (!result.data || result.data.length === 0) {
                 throw new APIError("Schema not found", 404);
             }
 
-            const schemaDefinition = schemaRecords[0];
-            // Return in same format as Sequelize
-            res.status(200).json({
+            return res.status(200).json({
                 data: {
-                    collectionName: schemaDefinition.collectionName,
-                    schema: schemaDefinition.schema
+                    collectionName: result.data[0].collectionName,
+                    schema: result.data[0].schema
                 }
             });
         } catch (error) {
