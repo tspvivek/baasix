@@ -33,7 +33,7 @@ DATABASE_URL="postgresql://postgres:password@localhost:5432/baasix"
 SECRET_KEY=your-32-character-secret-key-here
 
 // 5. Run
-node server.js
+npm run dev
 ```
 
 ---

@@ -269,7 +269,11 @@ startServer({
 {
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "tsx server.js",
+    "dev": "tsx watch server.js"
+  },
+  "devDependencies": {
+    "tsx": "^4.16.0"
   }
 }
 ```
