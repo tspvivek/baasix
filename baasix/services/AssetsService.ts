@@ -26,7 +26,28 @@ class AssetsService extends FilesService {
   }
 
   async getAsset(id: string | number, query: AssetQuery, bypassPermissions = false): Promise<AssetResult> {
-    const file = await this.itemsService.readOne(id, {}, bypassPermissions);
+    let file: any;
+    
+    if (bypassPermissions) {
+      // If bypassPermissions is explicitly requested, use it directly
+      file = await this.itemsService.readOne(id, {}, true);
+    } else {
+      // For public files (isPublic: true), we need to bypass permission checks
+      // First, try to read with bypassed permissions to check if file exists and is public
+      const fileCheck = await this.itemsService.readOne(id, {}, true);
+      
+      if (!fileCheck) {
+        throw new Error("File not found");
+      }
+      
+      // If file is public, allow access without permission check
+      if (fileCheck.isPublic === true) {
+        file = fileCheck;
+      } else {
+        // File is not public, check permissions normally
+        file = await this.itemsService.readOne(id, {}, false);
+      }
+    }
 
     if (!file) throw new Error("File not found");
 
