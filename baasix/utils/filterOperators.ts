@@ -579,15 +579,19 @@ export function nendsWithsOperator(ctx: OperatorContext, value: string, castType
  * Example: { status: { in: ['active', 'pending'] } }
  */
 export function inOperator(ctx: OperatorContext, value: any[], castType?: string): SQL {
+  // Handle null/undefined/non-array values - return a condition that's always false
+  if (!Array.isArray(value) || value.length === 0) {
+    return sql`1 = 0`;
+  }
+
   // Use buildColumnSQL if we have a tableName (alias) or castType to ensure proper aliasing
   if (castType || ctx.tableName) {
     const leftSQL = buildColumnSQL(ctx.fieldName, castType);
     // Use parameterized values instead of manual escaping
-    const placeholders = value.map(() => sql.raw('?')).join(', ');
     return sql`${leftSQL} IN (${sql.join(value.map(v => sql`${v}`), sql`, `)})`;
   }
 
-  return inArray(ctx.column, value || []);
+  return inArray(ctx.column, value);
 }
 
 /**
@@ -595,6 +599,11 @@ export function inOperator(ctx: OperatorContext, value: any[], castType?: string
  * Example: { status: { notIn: ['deleted', 'archived'] } }
  */
 export function notInOperator(ctx: OperatorContext, value: any[], castType?: string): SQL {
+  // Handle null/undefined/non-array values - return a condition that's always true
+  if (!Array.isArray(value) || value.length === 0) {
+    return sql`1 = 1`;
+  }
+
   // Use buildColumnSQL if we have a tableName (alias) or castType to ensure proper aliasing
   if (castType || ctx.tableName) {
     const leftSQL = buildColumnSQL(ctx.fieldName, castType);
@@ -602,7 +611,7 @@ export function notInOperator(ctx: OperatorContext, value: any[], castType?: str
     return sql`${leftSQL} NOT IN (${sql.join(value.map(v => sql`${v}`), sql`, `)})`;
   }
 
-  return notInArray(ctx.column, value || []);
+  return notInArray(ctx.column, value);
 }
 
 /**
@@ -824,7 +833,10 @@ export function jsonbHasKeyOperator(ctx: OperatorContext, value: string): SQL {
  */
 export function jsonbHasAnyKeysOperator(ctx: OperatorContext, value: string[]): SQL {
   const fieldRef = buildFieldRef(ctx.fieldName);
-  const keys = Array.isArray(value) ? value : [value];
+  const keys = Array.isArray(value) ? value : value != null ? [value] : [];
+  if (keys.length === 0) {
+    return sql`1 = 0`;
+  }
   const escapedKeys = keys.map(k => `'${String(k).replace(/'/g, "''")}'`).join(', ');
   return sql.raw(`${fieldRef} ?| array[${escapedKeys}]`);
 }
@@ -837,7 +849,10 @@ export function jsonbHasAnyKeysOperator(ctx: OperatorContext, value: string[]): 
  */
 export function jsonbHasAllKeysOperator(ctx: OperatorContext, value: string[]): SQL {
   const fieldRef = buildFieldRef(ctx.fieldName);
-  const keys = Array.isArray(value) ? value : [value];
+  const keys = Array.isArray(value) ? value : value != null ? [value] : [];
+  if (keys.length === 0) {
+    return sql`1 = 1`;
+  }
   const escapedKeys = keys.map(k => `'${String(k).replace(/'/g, "''")}'`).join(', ');
   return sql.raw(`${fieldRef} ?& array[${escapedKeys}]`);
 }
@@ -986,9 +1001,15 @@ export function jsonbKeyLteOperator(ctx: OperatorContext, value: { key: string; 
  * PostgreSQL: metadata->>'status' IN ('active', 'pending')
  */
 export function jsonbKeyInOperator(ctx: OperatorContext, value: { key: string; values: any[] }): SQL {
+  if (!value || value.key == null) {
+    return sql`1 = 0`;
+  }
   const fieldRef = buildFieldRef(ctx.fieldName);
   const escapedKey = String(value.key).replace(/'/g, "''");
-  const values = Array.isArray(value.values) ? value.values : [value.values];
+  const values = Array.isArray(value.values) ? value.values : value.values != null ? [value.values] : [];
+  if (values.length === 0) {
+    return sql`1 = 0`;
+  }
   const escapedValues = values.map(v => `'${String(v).replace(/'/g, "''")}'`).join(', ');
   return sql.raw(`${fieldRef}->>'${escapedKey}' IN (${escapedValues})`);
 }
@@ -998,9 +1019,15 @@ export function jsonbKeyInOperator(ctx: OperatorContext, value: { key: string; v
  * Example: { metadata: { jsonbKeyNotIn: { key: "status", values: ["deleted", "archived"] } } }
  */
 export function jsonbKeyNotInOperator(ctx: OperatorContext, value: { key: string; values: any[] }): SQL {
+  if (!value || value.key == null) {
+    return sql`1 = 1`;
+  }
   const fieldRef = buildFieldRef(ctx.fieldName);
   const escapedKey = String(value.key).replace(/'/g, "''");
-  const values = Array.isArray(value.values) ? value.values : [value.values];
+  const values = Array.isArray(value.values) ? value.values : value.values != null ? [value.values] : [];
+  if (values.length === 0) {
+    return sql`1 = 1`;
+  }
   const escapedValues = values.map(v => `'${String(v).replace(/'/g, "''")}'`).join(', ');
   return sql.raw(`${fieldRef}->>'${escapedKey}' NOT IN (${escapedValues})`);
 }
@@ -1098,8 +1125,14 @@ export function jsonbTypeOfOperator(ctx: OperatorContext, value: { path?: string
  * The path array represents the keys to traverse.
  */
 export function jsonbDeepValueOperator(ctx: OperatorContext, value: { path: string[]; value: any; op?: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'like' | 'ilike' }): SQL {
+  if (!value || value.path == null) {
+    return sql`1 = 0`;
+  }
   const fieldRef = buildFieldRef(ctx.fieldName);
-  const pathArray = Array.isArray(value.path) ? value.path : [value.path];
+  const pathArray = Array.isArray(value.path) ? value.path : value.path != null ? [value.path] : [];
+  if (pathArray.length === 0) {
+    return sql`1 = 0`;
+  }
   const escapedPath = pathArray.map(p => String(p).replace(/"/g, '\\"')).join(',');
   const op = value.op || 'eq';
   
