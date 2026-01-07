@@ -378,10 +378,11 @@ function processIncludeConfig(
     }
   }
   
-  // Determine if separate query needed (for HasMany)
+  // Determine if separate query needed (for HasMany and BelongsToMany)
+  // Both relation types require separate queries since they can't be efficiently joined
   const separate = config.separate !== undefined 
     ? config.separate 
-    : association.type === 'HasMany';
+    : association.type === 'HasMany' || association.type === 'BelongsToMany';
   
   return {
     relation: config.relation,

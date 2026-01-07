@@ -477,6 +477,7 @@ export class ItemsService {
     }
 
     // Apply permission filters
+    let permissionRelConditions: Record<string, any> = {};
     if (!bypassPermissions && !isAdmin) {
       const roleId = this.getRoleId();
 
@@ -504,6 +505,11 @@ export class ItemsService {
 
       if (permissionFilter.conditions) {
         filter = combineFilters(filter, permissionFilter.conditions);
+      }
+
+      // Capture relConditions from permissions to apply later
+      if (permissionFilter.relConditions && Object.keys(permissionFilter.relConditions).length > 0) {
+        permissionRelConditions = permissionFilter.relConditions;
       }
     }
 
@@ -544,9 +550,24 @@ export class ItemsService {
     // Note: query.include is not used - includes are derived from fields parameter
     const allIncludes = [...processedIncludes];
 
+    // Merge permission relConditions with query relConditions
+    // Permission relConditions take precedence (they are security constraints)
+    const mergedRelConditions = { ...query.relConditions };
+    for (const [relationName, conditions] of Object.entries(permissionRelConditions)) {
+      if (mergedRelConditions[relationName]) {
+        // Merge conditions for the same relation using combineFilters
+        mergedRelConditions[relationName] = combineFilters(
+          mergedRelConditions[relationName],
+          conditions as Record<string, any>
+        );
+      } else {
+        mergedRelConditions[relationName] = conditions;
+      }
+    }
+
     // Apply relConditions to includes (supports nested relConditions)
-    if (query.relConditions) {
-      const resolvedRelConditions = await resolveDynamicVariables(query.relConditions, this.accountability);
+    if (Object.keys(mergedRelConditions).length > 0) {
+      const resolvedRelConditions = await resolveDynamicVariables(mergedRelConditions, this.accountability);
 
       // Recursive function to apply relConditions to includes and their nested includes
       const applyRelConditionsRecursive = (includes: any[], relConds: Record<string, any>) => {
