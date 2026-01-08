@@ -463,6 +463,8 @@ export class ItemsService {
     limit?: number;
     offset?: number;
     filterJoins: any[];
+    userRequestedFields: string[];
+    userRequestedIncludes: ProcessedInclude[];
   }> {
     const { isAdmin, action, bypassPermissions, idFilter } = options;
 
@@ -540,9 +542,12 @@ export class ItemsService {
       this.collection
     );
 
-    // Ensure primary key is always included when there are relations
-    // This is needed for loadHasManyRelations to work correctly
-    if (processedIncludes.length > 0 && !directFields.includes(this.primaryKey)) {
+    // Copy expanded directFields before adding primary key (for sanitization later)
+    const expandedDirectFields = [...directFields];
+
+    // Ensure primary key is always included in directFields
+    // This is needed for proper record identification and loadHasManyRelations to work correctly
+    if (!directFields.includes(this.primaryKey) && !directFields.includes('*')) {
       directFields.unshift(this.primaryKey);
     }
 
@@ -761,8 +766,80 @@ export class ItemsService {
       processedIncludes,
       limit,
       offset,
-      filterJoins
+      filterJoins,
+      userRequestedFields: expandedDirectFields,
+      userRequestedIncludes: processedIncludes
     };
+  }
+
+  /**
+   * Sanitize records by removing auto-added fields that user didn't request
+   * This includes both main collection fields and nested relation fields
+   * 
+   * @param records - Records to sanitize
+   * @param userRequestedFields - Expanded direct fields requested by user (before auto-adding primary key)
+   * @param userRequestedIncludes - ProcessedIncludes containing relation field info
+   */
+  private sanitizeAutoAddedFields(
+    records: any[],
+    userRequestedFields: string[],
+    userRequestedIncludes: ProcessedInclude[]
+  ): any[] {
+    // Build a set of allowed fields for main collection
+    const allowedMainFields = new Set(userRequestedFields);
+    
+    // Build a map of includes by relation name
+    const includesMap = new Map<string, ProcessedInclude>();
+    for (const include of userRequestedIncludes) {
+      allowedMainFields.add(include.relation); // Allow relation key in main record
+      includesMap.set(include.relation, include);
+    }
+
+    // Recursive function to sanitize a record
+    const sanitizeRecord = (
+      record: any,
+      allowedFields: Set<string>,
+      includes: Map<string, ProcessedInclude>
+    ): any => {
+      const sanitized: any = {};
+
+      for (const [key, value] of Object.entries(record)) {
+        // Check if this is a relation
+        const include = includes.get(key);
+        
+        if (include) {
+          // This is a relation - recursively sanitize
+          const relationAllowedFields = new Set(include.attributes);
+          
+          // Build nested includes map
+          const nestedIncludesMap = new Map<string, ProcessedInclude>();
+          for (const nestedInclude of include.nested || []) {
+            relationAllowedFields.add(nestedInclude.relation);
+            nestedIncludesMap.set(nestedInclude.relation, nestedInclude);
+          }
+
+          if (Array.isArray(value)) {
+            sanitized[key] = value.map(item =>
+              item && typeof item === 'object'
+                ? sanitizeRecord(item, relationAllowedFields, nestedIncludesMap)
+                : item
+            );
+          } else if (value && typeof value === 'object') {
+            sanitized[key] = sanitizeRecord(value, relationAllowedFields, nestedIncludesMap);
+          } else {
+            sanitized[key] = value;
+          }
+        } else if (allowedFields.has(key)) {
+          // Regular field - keep if explicitly requested
+          sanitized[key] = value;
+        }
+        // else: field not requested, skip it
+      }
+
+      return sanitized;
+    };
+
+    return records.map(record => sanitizeRecord(record, allowedMainFields, includesMap));
   }
 
   /**
@@ -1149,7 +1226,9 @@ export class ItemsService {
         processedIncludes,
         limit,
         offset,
-        filterJoins = []
+        filterJoins = [],
+        userRequestedFields = [],
+        userRequestedIncludes = []
       } = await this.buildQuery(modifiedQuery, {
         isAdmin,
         action: 'read',
@@ -1355,12 +1434,19 @@ export class ItemsService {
       // Strip hidden fields from records
       const strippedRecords = fieldUtils.stripHiddenFieldsFromRecords(this.collection, finalRecords);
 
+      // Sanitize auto-added fields (remove fields user didn't request)
+      const sanitizedRecords = this.sanitizeAutoAddedFields(
+        strippedRecords,
+        userRequestedFields,
+        userRequestedIncludes
+      );
+
       // Execute after-read hooks
       hookData = await hooksManager.executeHooks(
         this.collection,
         'items.read.after',
         this.accountability,
-        { query: modifiedQuery, result: { data: strippedRecords, totalCount } }
+        { query: modifiedQuery, result: { data: sanitizedRecords, totalCount } }
       );
 
       return hookData.result;
