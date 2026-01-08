@@ -10,18 +10,6 @@ import { getProjectPath, toFileURL } from '../utils/dirname.js';
 export type { HookContext, HookFunction };
 
 /**
- * Lazy getter for SocketService to avoid circular dependency
- */
-let _socketService: any = null;
-async function getSocketService() {
-  if (!_socketService) {
-    const module = await import('./SocketService.js');
-    _socketService = module.default;
-  }
-  return _socketService;
-}
-
-/**
  * Hooks Manager - Executes lifecycle hooks for collections
  *
  * Matches Sequelize implementation 1:1
@@ -87,63 +75,6 @@ export class HooksManager {
       // Update modifiedData with hook result if provided
       if (result) {
         modifiedData = result;
-      }
-    }
-
-    // Handle socket broadcasts after standard hooks
-    // Only broadcast for items-related events
-    if (event.startsWith('items.') && event.endsWith('.after')) {
-      const action = event.split('.')[1]; // 'create', 'update', or 'delete'
-
-      // Check if socket broadcasting is enabled
-      const shouldBroadcast =
-        process.env.SOCKET_ENABLED === 'true' &&
-        (!process.env.SOCKET_EXCLUDE_COLLECTIONS ||
-          !process.env.SOCKET_EXCLUDE_COLLECTIONS.includes(collection));
-
-      if (shouldBroadcast) {
-        // Use lazy getter for socket service to avoid circular dependencies
-        try {
-          const socketService = await getSocketService();
-          
-          switch (action) {
-            case 'create':
-              if (modifiedData.document) {
-                socketService.broadcastChange(
-                  collection,
-                  'create',
-                  modifiedData.document,
-                  accountability
-                );
-              }
-              break;
-
-            case 'update':
-              if (modifiedData.document) {
-                socketService.broadcastChange(
-                  collection,
-                  'update',
-                  modifiedData.document,
-                  accountability
-                );
-              }
-              break;
-
-            case 'delete':
-              if (modifiedData.id) {
-                socketService.broadcastChange(
-                  collection,
-                  'delete',
-                  { id: modifiedData.id, ...modifiedData.document },
-                  accountability
-                );
-              }
-              break;
-          }
-        } catch (error) {
-          // Socket service not available or disabled
-          console.warn('Socket service not available for broadcasting');
-        }
       }
     }
 

@@ -42,7 +42,7 @@
 - **📊 Reporting & Analytics** — Generate complex reports with grouping and aggregation
 - **🪝 Hooks System** — Extend functionality with custom hooks on CRUD operations
 - **🏢 Multi-tenant Architecture** — Host multiple isolated organizations in a single instance
-- **⚡ Real-time Updates** — Socket.IO integration with Redis clustering
+- **⚡ Real-time Updates** — Socket.IO integration with Redis clustering, plus WAL-based CDC for database changes
 - **🚀 High Performance** — Redis-based caching with configurable TTL
 - **🖥️ CLI Tools** — Project scaffolding, TypeScript type generation, and migration management
 - **✉️ Email Template Designer** — Visual drag-and-drop email template editor with variable placeholders
@@ -98,6 +98,31 @@ await baasix.realtime.connect();
 baasix.realtime.subscribe('products', (payload) => {
   console.log(`Product ${payload.action}:`, payload.data);
 });
+```
+
+### WAL-Based Realtime (PostgreSQL Logical Replication)
+
+For production environments, Baasix supports PostgreSQL's Write-Ahead Log (WAL) for capturing database changes at the database level. This catches ALL changes including direct SQL, migrations, and external tools.
+
+**PostgreSQL Configuration:**
+```sql
+-- In postgresql.conf:
+wal_level = logical
+max_replication_slots = 4
+max_wal_senders = 4
+```
+
+**Environment Variables:**
+```bash
+SOCKET_ENABLED=true
+REALTIME_WAL_ENABLED=true
+```
+
+**Enable realtime for a collection:**
+```bash
+# Via API (admin only)
+POST /realtime/collections/products/enable
+{ "replicaIdentityFull": true }  # Optional: enables old values on UPDATE/DELETE
 ```
 
 ### SDK Features

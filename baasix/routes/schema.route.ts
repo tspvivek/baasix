@@ -294,6 +294,20 @@ const registerEndpoint = (app: Express, context?: any) => {
             // Invalidate schema definition cache after creating schema
             await invalidateEntireCache('baasix_SchemaDefinition');
 
+            // Sync realtime if the new schema has realtime enabled
+            const hasRealtime = processedSchema.realtime === true || 
+                (typeof processedSchema.realtime === 'object' && processedSchema.realtime?.enabled);
+            if (hasRealtime) {
+                try {
+                    const realtimeService = (await import('../services/RealtimeService.js')).default;
+                    if (realtimeService.isWalAvailable()) {
+                        await realtimeService.reloadCollections([collectionName]);
+                    }
+                } catch (error) {
+                    console.warn('Could not sync realtime configuration:', error.message);
+                }
+            }
+
             console.log("Schema created successfully");
             res.status(201).json({ message: "Schema created successfully" });
         } catch (error) {
@@ -330,6 +344,9 @@ const registerEndpoint = (app: Express, context?: any) => {
                 existingSchema.timestamps !== schema.timestamps ||
                 existingSchema.paranoid !== schema.paranoid;
 
+            // Check if realtime config changed
+            const realtimeChanged = !deepEqual(existingSchema.realtime, schema.realtime);
+
             console.log(`Flags changed: ${flagsChanged}`);
 
             // Process schema flags
@@ -349,6 +366,24 @@ const registerEndpoint = (app: Express, context?: any) => {
 
             // Invalidate schema definition cache after updating schema
             await invalidateEntireCache('baasix_SchemaDefinition');
+
+            // Sync realtime if the config changed
+            if (realtimeChanged) {
+                console.log(`Realtime config changed for ${collectionName}, syncing...`);
+                console.log(`  Old: ${JSON.stringify(existingSchema.realtime)}`);
+                console.log(`  New: ${JSON.stringify(schema.realtime)}`);
+                try {
+                    const realtimeService = (await import('../services/RealtimeService.js')).default;
+                    if (realtimeService.isWalAvailable()) {
+                        await realtimeService.reloadCollections([collectionName]);
+                        console.log(`Realtime configuration synced for ${collectionName}`);
+                    } else {
+                        console.log(`WAL not available, skipping realtime sync for ${collectionName}`);
+                    }
+                } catch (error) {
+                    console.warn('Could not sync realtime configuration:', error.message);
+                }
+            }
 
             console.log(`Schema for ${collectionName} updated successfully`);
             res.status(200).json({ message: "Schema updated successfully" });
@@ -374,6 +409,16 @@ const registerEndpoint = (app: Express, context?: any) => {
 
             // Invalidate schema definition cache after deleting schema
             await invalidateEntireCache('baasix_SchemaDefinition');
+
+            // Remove from realtime publication if it was enabled
+            try {
+                const realtimeService = (await import('../services/RealtimeService.js')).default;
+                if (realtimeService.isWalAvailable()) {
+                    await realtimeService.reloadCollections([collectionName]);
+                }
+            } catch (error) {
+                console.warn('Could not sync realtime configuration:', error.message);
+            }
 
             console.log("Schema deleted successfully");
             res.status(200).json({ message: "Schema deleted successfully" });
@@ -1356,6 +1401,9 @@ const registerEndpoint = (app: Express, context?: any) => {
                     errors: [],
                 };
 
+                // Track collections with realtime config changes for efficient sync
+                const realtimeChangedCollections: string[] = [];
+
                 // Process each schema
                 for (const schemaData of importData.schemas) {
                     try {
@@ -1369,6 +1417,11 @@ const registerEndpoint = (app: Express, context?: any) => {
                             const differences = compareSchemas(existingSchema.schema, processedSchema);
 
                             if (Object.keys(differences).length > 0) {
+                                // Track if realtime config changed
+                                if (differences.realtime) {
+                                    realtimeChangedCollections.push(schemaData.collectionName);
+                                }
+
                                 // Update existing schema only if there are changes
                                 await schemaManager.updateModel(
                                     schemaData.collectionName,
@@ -1382,6 +1435,12 @@ const registerEndpoint = (app: Express, context?: any) => {
                                 changes.unchanged.push(schemaData.collectionName);
                             }
                         } else {
+                            // Create new schema - check if it has realtime enabled
+                            if (processedSchema.realtime === true || 
+                                (typeof processedSchema.realtime === 'object' && processedSchema.realtime?.enabled)) {
+                                realtimeChangedCollections.push(schemaData.collectionName);
+                            }
+
                             // Create new schema
                             await schemaManager.updateModel(
                                 schemaData.collectionName,
@@ -1402,6 +1461,19 @@ const registerEndpoint = (app: Express, context?: any) => {
                 }
 
                 await invalidateEntireCache();
+
+                // Reload realtime configuration only for collections with realtime changes
+                if (realtimeChangedCollections.length > 0) {
+                    try {
+                        const realtimeService = (await import('../services/RealtimeService.js')).default;
+                        if (realtimeService.isWalAvailable()) {
+                            await realtimeService.reloadCollections(realtimeChangedCollections);
+                            console.log(`Realtime configuration reloaded for ${realtimeChangedCollections.length} collections: ${realtimeChangedCollections.join(', ')}`);
+                        }
+                    } catch (error) {
+                        console.warn('Could not reload realtime configuration:', error.message);
+                    }
+                }
 
                 res.status(200).json({
                     message: "Schema import completed",
@@ -1507,6 +1579,17 @@ const registerEndpoint = (app: Express, context?: any) => {
                     type: "modified",
                     from: currentIndexes,
                     to: newIndexes,
+                };
+            }
+        }
+
+        // Compare realtime configuration
+        if (normalizedCurrent.realtime !== undefined || normalizedNew.realtime !== undefined) {
+            if (!deepEqual(normalizedCurrent.realtime, normalizedNew.realtime)) {
+                differences.realtime = {
+                    type: "modified",
+                    from: normalizedCurrent.realtime,
+                    to: normalizedNew.realtime,
                 };
             }
         }

@@ -163,6 +163,17 @@ function getSystemEndpoints(): EndpointInfo[] {
         { path: "/notifications/cleanup", method: "POST", type: "system", category: "notifications", description: "Cleanup old notifications (admin)" },
     ] : [];
 
+    const realtimeEndpoints = [
+        // Realtime WAL endpoints (PostgreSQL logical replication)
+        { path: "/realtime/status", method: "GET", type: "system", category: "realtime", description: "Get realtime service status (admin)" },
+        { path: "/realtime/config", method: "GET", type: "system", category: "realtime", description: "Get PostgreSQL replication configuration (admin)" },
+        { path: "/realtime/collections", method: "GET", type: "system", category: "realtime", description: "Get list of realtime-enabled collections (admin)" },
+        { path: "/realtime/collections/{collection}", method: "GET", type: "system", category: "realtime", description: "Check if collection has realtime enabled (admin)" },
+        { path: "/realtime/collections/{collection}/enable", method: "POST", type: "system", category: "realtime", description: "Enable realtime for collection (admin)" },
+        { path: "/realtime/collections/{collection}/disable", method: "POST", type: "system", category: "realtime", description: "Disable realtime for collection (admin)" },
+        { path: "/realtime/initialize", method: "POST", type: "system", category: "realtime", description: "Initialize realtime service manually (admin)" },
+    ];
+
     const systemEndpoints = [
         ...authEndpoints,
         ...multiTenantEndpoints,
@@ -179,6 +190,7 @@ function getSystemEndpoints(): EndpointInfo[] {
         { path: "/assets/{id}", method: "GET", type: "system", category: "files", description: "Get file asset" },
         ...notificationEndpoints,
         ...utilsEndpoints,
+        ...realtimeEndpoints,
     ];
 
     return systemEndpoints;
@@ -922,6 +934,11 @@ function createSystemEndpointOperation(endpoint: EndpointInfo): any {
     // Add specific schemas for utils endpoints
     if (endpointPath.startsWith("/utils")) {
         return createUtilsEndpointOperation(endpoint);
+    }
+
+    // Add specific schemas for realtime endpoints
+    if (endpointPath.startsWith("/realtime")) {
+        return createRealtimeEndpointOperation(endpoint);
     }
 
     // Add parameters for endpoints with path parameters
@@ -2032,6 +2049,230 @@ function getCollectionEndpointDescription(path: string, method: string, collecti
     };
 
     return methodDescriptions[method] || `${method.toUpperCase()} operation for ${collectionName}`;
+}
+
+function createRealtimeEndpointOperation(endpoint: EndpointInfo): any {
+    const { path: endpointPath, method, description, category } = endpoint;
+    const methodLower = method.toLowerCase();
+
+    const operation: any = {
+        summary: description,
+        tags: ["realtime"],
+        security: [{ bearerAuth: [] }],
+        responses: getStandardResponses()
+    };
+
+    if (endpointPath === "/realtime/status" && methodLower === "get") {
+        operation.description = "Get the current status of the realtime WAL service including replication configuration";
+        operation.responses["200"] = {
+            description: "Realtime service status",
+            content: {
+                "application/json": {
+                    schema: {
+                        type: "object",
+                        properties: {
+                            data: {
+                                type: "object",
+                                properties: {
+                                    initialized: { type: "boolean", description: "Whether the service is initialized" },
+                                    connected: { type: "boolean", description: "Whether connected to PostgreSQL replication" },
+                                    enabledCollections: { 
+                                        type: "array", 
+                                        items: { type: "string" },
+                                        description: "List of collections with realtime enabled"
+                                    },
+                                    publicationName: { type: "string", description: "PostgreSQL publication name" },
+                                    slotName: { type: "string", description: "PostgreSQL replication slot name" },
+                                    walEnabled: { type: "boolean", description: "Whether WAL-based realtime is enabled" },
+                                    replicationConfig: {
+                                        type: "object",
+                                        properties: {
+                                            walLevel: { type: "string" },
+                                            maxReplicationSlots: { type: "integer" },
+                                            maxWalSenders: { type: "integer" },
+                                            isConfigured: { type: "boolean" },
+                                            issues: { type: "array", items: { type: "string" } }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    } else if (endpointPath === "/realtime/config" && methodLower === "get") {
+        operation.description = "Check PostgreSQL logical replication configuration requirements";
+        operation.responses["200"] = {
+            description: "PostgreSQL replication configuration",
+            content: {
+                "application/json": {
+                    schema: {
+                        type: "object",
+                        properties: {
+                            data: {
+                                type: "object",
+                                properties: {
+                                    walLevel: { type: "string", description: "Current wal_level setting" },
+                                    maxReplicationSlots: { type: "integer", description: "Maximum replication slots" },
+                                    maxWalSenders: { type: "integer", description: "Maximum WAL senders" },
+                                    isConfigured: { type: "boolean", description: "Whether all requirements are met" },
+                                    issues: { 
+                                        type: "array", 
+                                        items: { type: "string" },
+                                        description: "Configuration issues if any"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    } else if (endpointPath === "/realtime/collections" && methodLower === "get") {
+        operation.description = "Get list of all collections that have realtime enabled";
+        operation.responses["200"] = {
+            description: "List of realtime-enabled collections",
+            content: {
+                "application/json": {
+                    schema: {
+                        type: "object",
+                        properties: {
+                            data: {
+                                type: "array",
+                                items: { type: "string" },
+                                description: "Collection names with realtime enabled"
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    } else if (endpointPath === "/realtime/collections/{collection}" && methodLower === "get") {
+        operation.description = "Check if a specific collection has realtime enabled";
+        operation.parameters = [{
+            name: "collection",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+            description: "Collection name"
+        }];
+        operation.responses["200"] = {
+            description: "Collection realtime status",
+            content: {
+                "application/json": {
+                    schema: {
+                        type: "object",
+                        properties: {
+                            data: {
+                                type: "object",
+                                properties: {
+                                    collection: { type: "string" },
+                                    enabled: { type: "boolean" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    } else if (endpointPath === "/realtime/collections/{collection}/enable" && methodLower === "post") {
+        operation.description = "Enable realtime for a collection. This adds the table to the PostgreSQL publication and starts streaming changes.";
+        operation.parameters = [{
+            name: "collection",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+            description: "Collection name to enable realtime for"
+        }];
+        operation.requestBody = {
+            content: {
+                "application/json": {
+                    schema: {
+                        type: "object",
+                        properties: {
+                            replicaIdentityFull: { 
+                                type: "boolean", 
+                                default: false,
+                                description: "Set REPLICA IDENTITY FULL to include old values on UPDATE/DELETE (requires table lock)"
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        operation.responses["200"] = {
+            description: "Realtime enabled successfully",
+            content: {
+                "application/json": {
+                    schema: {
+                        type: "object",
+                        properties: {
+                            data: {
+                                type: "object",
+                                properties: {
+                                    message: { type: "string" },
+                                    collection: { type: "string" },
+                                    replicaIdentityFull: { type: "boolean" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    } else if (endpointPath === "/realtime/collections/{collection}/disable" && methodLower === "post") {
+        operation.description = "Disable realtime for a collection. This removes the table from the PostgreSQL publication.";
+        operation.parameters = [{
+            name: "collection",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+            description: "Collection name to disable realtime for"
+        }];
+        operation.responses["200"] = {
+            description: "Realtime disabled successfully",
+            content: {
+                "application/json": {
+                    schema: {
+                        type: "object",
+                        properties: {
+                            data: {
+                                type: "object",
+                                properties: {
+                                    message: { type: "string" },
+                                    collection: { type: "string" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    } else if (endpointPath === "/realtime/initialize" && methodLower === "post") {
+        operation.description = "Manually initialize the realtime service if it was not auto-started";
+        operation.responses["200"] = {
+            description: "Realtime service initialized",
+            content: {
+                "application/json": {
+                    schema: {
+                        type: "object",
+                        properties: {
+                            data: {
+                                type: "object",
+                                properties: {
+                                    message: { type: "string" },
+                                    status: { type: "object" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
+
+    return operation;
 }
 
 export default {

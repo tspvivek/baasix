@@ -22,6 +22,7 @@ import { startSessionCleanup } from "./utils/sessionCleanup.js";
 import schedule from "node-schedule";
 import { rateLimit } from "express-rate-limit";
 import socketService from "./services/SocketService.js";
+import realtimeService from "./services/RealtimeService.js";
 import tasksService from "./services/TasksService.js";
 import workflowService from "./services/WorkflowService.js";
 import migrationService from "./services/MigrationService.js";
@@ -300,6 +301,11 @@ async function gracefulShutdown(signal: string) {
       await workflowService.shutdown();
     }
 
+    console.warn("Shutting down RealtimeService...");
+    if (typeof realtimeService.shutdown === 'function') {
+      await realtimeService.shutdown();
+    }
+
     console.warn("Closing cache...");
     await closeCache();
 
@@ -376,6 +382,25 @@ export async function startServer(options?: StartServerOptions | number) {
     // Initialize Socket.IO if enabled
     if (env.get("SOCKET_ENABLED") === "true") {
       await socketService.initialize(server);
+
+      // Initialize Realtime Service - connects to Socket.IO for broadcasting
+      // This will gracefully handle WAL being unavailable (falls back to hook-based)
+      logger.info("Initializing Realtime Service...");
+      realtimeService.setSocketService(socketService);
+      await realtimeService.initialize();
+      
+      // Start WAL consumer if available (non-blocking - runs in background)
+      // This is intentionally not awaited as it's a long-running subscription
+      realtimeService.startConsuming().catch((error) => {
+        logger.error(error, "Failed to start WAL consumer");
+      });
+      
+      const status = realtimeService.getStatus();
+      if (status.walAvailable) {
+        logger.info("✅ Realtime Service started with WAL-based change capture");
+      } else {
+        logger.info("✅ Realtime Service started (WAL not available - no automatic broadcasting)");
+      }
     }
 
     server.listen(serverPort, () => {

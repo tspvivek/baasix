@@ -28,6 +28,7 @@ export { default as AssetsService } from './services/AssetsService.js';
 export { default as HooksManager } from './services/HooksManager.js';
 export { default as ReportService } from './services/ReportService.js';
 export { default as SocketService } from './services/SocketService.js';
+export { default as RealtimeService } from './services/RealtimeService.js';
 export { default as StatsService } from './services/StatsService.js';
 export { default as TasksService } from './services/TasksService.js';
 export { default as WorkflowService } from './services/WorkflowService.js';

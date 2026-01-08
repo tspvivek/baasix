@@ -1,6 +1,6 @@
 {
     "name": "@tspvivek/baasix",
-    "version": "0.1.0-alpha.48",
+    "version": "0.1.0-alpha.49",
     "description": "Baasix - Backend-as-a-Service with 40+ tools for schema management, CRUD operations with 50+ filter operators, relationships, permissions, files, workflows, and more",
     "main": "dist/index.js",
     "type": "module",
@@ -66,6 +66,7 @@
         "node-schedule": "^2.1.1",
         "nodemailer": "^6.9.14",
         "pg": "^8.13.0",
+        "pg-logical-replication": "^2.3.0",
         "pino": "^10.1.0",
         "pino-pretty": "^13.1.3",
         "postgres": "^3.4.4",

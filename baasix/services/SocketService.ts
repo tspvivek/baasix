@@ -11,12 +11,30 @@ import type { Server as HTTPServer } from "http";
 import type { Socket } from "socket.io";
 import type { UserInfo, SocketWithAuth } from '../types/index.js';
 
+// Type for custom message handler callback
+export type CustomMessageHandler = (
+  socket: SocketWithAuth,
+  data: any,
+  callback?: (response: any) => void
+) => void | Promise<void>;
+
+// Type for room join/leave validator
+export type RoomValidator = (
+  socket: SocketWithAuth,
+  roomName: string
+) => boolean | Promise<boolean>;
+
 class SocketService {
   private io: Server | null = null;
   private userSockets: Map<string | number, Set<Socket>> = new Map();
   private initialized: boolean = false;
   private redisPublisher: Redis | null = null;
   private redisSubscriber: Redis | null = null;
+  
+  // Custom room management
+  private customRooms: Map<string, Set<string>> = new Map(); // roomName -> Set of socket IDs
+  private customMessageHandlers: Map<string, CustomMessageHandler> = new Map();
+  private roomValidators: Map<string, RoomValidator> = new Map();
 
   constructor() {
     console.info("Socket Service instance created");
@@ -48,7 +66,7 @@ class SocketService {
         methods: ["GET", "POST", "PATCH", "DELETE"],
         credentials: true,
       },
-      path: env.get("SOCKET_PATH") || "/socket",
+      path: env.get("SOCKET_PATH") || "/realtime",
       pingTimeout: 60000,
       pingInterval: 25000,
     });
@@ -202,6 +220,45 @@ class SocketService {
         console.log(`User ${socket.userId} joined execution room: ${executionId}`);
       });
 
+      // Handle custom room join
+      socket.on("room:join", async (data: { room: string }, callback?: (response: any) => void) => {
+        try {
+          await this.handleRoomJoin(socket, data.room);
+          callback?.({ status: "success", room: data.room });
+        } catch (error: any) {
+          callback?.({ status: "error", message: error.message });
+        }
+      });
+
+      // Handle custom room leave
+      socket.on("room:leave", (data: { room: string }, callback?: (response: any) => void) => {
+        try {
+          this.handleRoomLeave(socket, data.room);
+          callback?.({ status: "success", room: data.room });
+        } catch (error: any) {
+          callback?.({ status: "error", message: error.message });
+        }
+      });
+
+      // Handle custom room message (client -> server -> room)
+      socket.on("room:message", async (data: { room: string; event: string; payload: any }, callback?: (response: any) => void) => {
+        try {
+          await this.handleRoomMessage(socket, data.room, data.event, data.payload);
+          callback?.({ status: "success" });
+        } catch (error: any) {
+          callback?.({ status: "error", message: error.message });
+        }
+      });
+
+      // Handle custom events with registered handlers
+      socket.on("custom", async (data: { event: string; payload: any }, callback?: (response: any) => void) => {
+        try {
+          await this.handleCustomEvent(socket, data.event, data.payload, callback);
+        } catch (error: any) {
+          callback?.({ status: "error", message: error.message });
+        }
+      });
+
       // Handle disconnect
       socket.on("disconnect", () => {
         this.handleDisconnect(socket);
@@ -253,6 +310,284 @@ class SocketService {
         this.userSockets.delete(socket.userId);
       }
     }
+    
+    // Clean up custom room memberships
+    for (const [roomName, members] of this.customRooms.entries()) {
+      if (members.has(socket.id)) {
+        members.delete(socket.id);
+        // Emit leave event to room
+        this.io?.to(`room:${roomName}`).emit("room:user:left", {
+          room: roomName,
+          userId: socket.userId,
+          socketId: socket.id,
+          timestamp: new Date().toISOString(),
+        });
+        // Clean up empty rooms
+        if (members.size === 0) {
+          this.customRooms.delete(roomName);
+        }
+      }
+    }
+  }
+
+  // ==========================================
+  // Custom Room Management
+  // ==========================================
+
+  /**
+   * Handle a user joining a custom room
+   */
+  async handleRoomJoin(socket: SocketWithAuth, roomName: string): Promise<void> {
+    // Validate room name
+    if (!roomName || typeof roomName !== "string") {
+      throw new APIError("Invalid room name", 400);
+    }
+
+    // Check if there's a validator for this room pattern
+    for (const [pattern, validator] of this.roomValidators.entries()) {
+      if (roomName.startsWith(pattern) || roomName === pattern) {
+        const isValid = await validator(socket, roomName);
+        if (!isValid) {
+          throw new APIError("Not authorized to join this room", 403);
+        }
+        break;
+      }
+    }
+
+    // Add socket to custom room tracking
+    if (!this.customRooms.has(roomName)) {
+      this.customRooms.set(roomName, new Set());
+    }
+    this.customRooms.get(roomName)!.add(socket.id);
+
+    // Join the Socket.IO room (prefixed with "room:")
+    socket.join(`room:${roomName}`);
+
+    console.log(`User ${socket.userId} joined custom room: ${roomName}`);
+
+    // Notify others in the room
+    socket.to(`room:${roomName}`).emit("room:user:joined", {
+      room: roomName,
+      userId: socket.userId,
+      socketId: socket.id,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Handle a user leaving a custom room
+   */
+  handleRoomLeave(socket: SocketWithAuth, roomName: string): void {
+    if (!roomName || typeof roomName !== "string") {
+      throw new APIError("Invalid room name", 400);
+    }
+
+    // Remove from custom room tracking
+    if (this.customRooms.has(roomName)) {
+      this.customRooms.get(roomName)!.delete(socket.id);
+      if (this.customRooms.get(roomName)!.size === 0) {
+        this.customRooms.delete(roomName);
+      }
+    }
+
+    // Leave the Socket.IO room
+    socket.leave(`room:${roomName}`);
+
+    console.log(`User ${socket.userId} left custom room: ${roomName}`);
+
+    // Notify others in the room
+    this.io?.to(`room:${roomName}`).emit("room:user:left", {
+      room: roomName,
+      userId: socket.userId,
+      socketId: socket.id,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Handle a message sent to a custom room
+   */
+  async handleRoomMessage(socket: SocketWithAuth, roomName: string, event: string, payload: any): Promise<void> {
+    if (!roomName || typeof roomName !== "string") {
+      throw new APIError("Invalid room name", 400);
+    }
+
+    // Check if the socket is in the room
+    if (!this.customRooms.has(roomName) || !this.customRooms.get(roomName)!.has(socket.id)) {
+      throw new APIError("Not a member of this room", 403);
+    }
+
+    // Broadcast to all room members (including sender)
+    this.io?.to(`room:${roomName}`).emit(`room:${event}`, {
+      room: roomName,
+      event,
+      payload,
+      sender: {
+        userId: socket.userId,
+        socketId: socket.id,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Handle custom events with registered handlers
+   */
+  async handleCustomEvent(
+    socket: SocketWithAuth,
+    event: string,
+    payload: any,
+    callback?: (response: any) => void
+  ): Promise<void> {
+    const handler = this.customMessageHandlers.get(event);
+    if (!handler) {
+      callback?.({ status: "error", message: `No handler registered for event: ${event}` });
+      return;
+    }
+
+    await handler(socket, payload, callback);
+  }
+
+  // ==========================================
+  // Public API for Custom Rooms (for extensions)
+  // ==========================================
+
+  /**
+   * Register a custom message handler for a specific event
+   * Can be used by extensions to handle custom socket events
+   * 
+   * @example
+   * socketService.registerMessageHandler("game:move", async (socket, data, callback) => {
+   *   // Handle game move logic
+   *   callback?.({ status: "success", result: { ... } });
+   * });
+   */
+  registerMessageHandler(event: string, handler: CustomMessageHandler): void {
+    this.customMessageHandlers.set(event, handler);
+    console.info(`Registered custom socket handler for event: ${event}`);
+  }
+
+  /**
+   * Unregister a custom message handler
+   */
+  unregisterMessageHandler(event: string): void {
+    this.customMessageHandlers.delete(event);
+    console.info(`Unregistered custom socket handler for event: ${event}`);
+  }
+
+  /**
+   * Register a validator for room join requests
+   * Validator is called when a user tries to join a room matching the pattern
+   * 
+   * @example
+   * socketService.registerRoomValidator("game:", async (socket, roomName) => {
+   *   // Only allow admins to join game rooms
+   *   return socket.userRole.name === "administrator";
+   * });
+   */
+  registerRoomValidator(roomPattern: string, validator: RoomValidator): void {
+    this.roomValidators.set(roomPattern, validator);
+    console.info(`Registered room validator for pattern: ${roomPattern}`);
+  }
+
+  /**
+   * Unregister a room validator
+   */
+  unregisterRoomValidator(roomPattern: string): void {
+    this.roomValidators.delete(roomPattern);
+    console.info(`Unregistered room validator for pattern: ${roomPattern}`);
+  }
+
+  /**
+   * Broadcast a message to a custom room from server side
+   * 
+   * @example
+   * socketService.broadcastToRoom("game:123", "game:state", { players: [...] });
+   */
+  broadcastToRoom(roomName: string, event: string, payload: any): void {
+    if (!this.initialized || !this.io) {
+      console.warn("Socket service not initialized");
+      return;
+    }
+
+    this.io.to(`room:${roomName}`).emit(event, {
+      room: roomName,
+      payload,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Broadcast a message to all connected users
+   * 
+   * @example
+   * socketService.broadcastToAll("system:announcement", { message: "Server maintenance in 5 minutes" });
+   */
+  broadcastToAll(event: string, payload: any): void {
+    if (!this.initialized || !this.io) {
+      console.warn("Socket service not initialized");
+      return;
+    }
+
+    this.io.emit(event, {
+      payload,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Send a message to a specific user (all their connected sockets)
+   * 
+   * @example
+   * socketService.sendToUser(userId, "private:message", { from: "admin", text: "Hello!" });
+   */
+  sendToUser(userId: string | number, event: string, payload: any): void {
+    if (!this.initialized || !this.io) {
+      console.warn("Socket service not initialized");
+      return;
+    }
+
+    const userSocketSet = this.userSockets.get(userId);
+    if (userSocketSet) {
+      for (const socket of userSocketSet) {
+        socket.emit(event, {
+          payload,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  /**
+   * Get list of users in a custom room
+   */
+  getRoomMembers(roomName: string): string[] {
+    return Array.from(this.customRooms.get(roomName) || []);
+  }
+
+  /**
+   * Get count of users in a custom room
+   */
+  getRoomMemberCount(roomName: string): number {
+    return this.customRooms.get(roomName)?.size || 0;
+  }
+
+  /**
+   * Check if a room exists
+   */
+  roomExists(roomName: string): boolean {
+    return this.customRooms.has(roomName) && this.customRooms.get(roomName)!.size > 0;
+  }
+
+  /**
+   * Get all custom rooms
+   */
+  getCustomRooms(): Map<string, number> {
+    const rooms = new Map<string, number>();
+    for (const [name, members] of this.customRooms.entries()) {
+      rooms.set(name, members.size);
+    }
+    return rooms;
   }
 
   async checkCollectionAccess(socket: SocketWithAuth, collection: string): Promise<boolean> {
@@ -335,7 +670,15 @@ class SocketService {
         status: "not initialized",
         totalConnections: 0,
         uniqueUsers: 0,
+        customRooms: 0,
+        registeredHandlers: 0,
       };
+    }
+
+    // Build custom rooms summary
+    const customRoomsSummary: Record<string, number> = {};
+    for (const [name, members] of this.customRooms.entries()) {
+      customRoomsSummary[name] = members.size;
     }
 
     return {
@@ -343,6 +686,12 @@ class SocketService {
       totalConnections: this.io.engine.clientsCount,
       uniqueUsers: this.userSockets.size,
       rooms: this.io.sockets.adapter.rooms,
+      customRooms: {
+        count: this.customRooms.size,
+        rooms: customRoomsSummary,
+      },
+      registeredHandlers: Array.from(this.customMessageHandlers.keys()),
+      registeredValidators: Array.from(this.roomValidators.keys()),
     };
   }
 }
