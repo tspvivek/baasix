@@ -1945,6 +1945,280 @@ export class SchemaManager {
     console.log(`Removing index ${indexName} from ${collectionName}`);
     // Stub for now
   }
+
+  /**
+   * Add missing foreign key indexes to all collections
+   * Useful for migrating existing databases to use auto-indexing
+   */
+  async addMissingForeignKeyIndexes(accountability?: any): Promise<{
+    created: Array<{ collection: string; indexName: string; field: string }>;
+    skipped: Array<{ collection: string; indexName: string; reason: string }>;
+    errors: Array<{ collection: string; indexName: string; error: string }>;
+  }> {
+    const sql = getSqlClient();
+    const result = {
+      created: [] as Array<{ collection: string; indexName: string; field: string }>,
+      skipped: [] as Array<{ collection: string; indexName: string; reason: string }>,
+      errors: [] as Array<{ collection: string; indexName: string; error: string }>,
+    };
+
+    console.log('Scanning for missing foreign key indexes...');
+
+    // Fetch all schema definitions from database (not from memory cache which has Drizzle table objects)
+    const schemaDefinitions = await sql`
+      SELECT "collectionName", schema FROM "baasix_SchemaDefinition"
+    `;
+
+    console.log(`Found ${schemaDefinitions.length} schemas to scan for missing indexes`);
+
+    // Track which schemas need to be updated
+    const schemasToUpdate: Map<string, { schema: any; newIndexes: Array<{ name: string; fields: string[]; unique: boolean }> }> = new Map();
+
+    for (const schemaDef of schemaDefinitions) {
+      const collectionName = schemaDef.collectionName;
+      const schema = schemaDef.schema;
+      
+      if (!schema?.fields) continue;
+
+      const newIndexes: Array<{ name: string; fields: string[]; unique: boolean }> = [];
+
+      // Find all BelongsTo relationships (M2O, O2O)
+      for (const [fieldName, fieldDef] of Object.entries(schema.fields)) {
+        const field = fieldDef as any;
+        
+        // Skip if field definition is null/undefined
+        if (!field) continue;
+        
+        // Check if this is a BelongsTo relation
+        if (field.relType === 'BelongsTo' && field.foreignKey) {
+          const fkColumn = field.foreignKey;
+          const indexName = `${collectionName}_${fkColumn}_idx`;
+
+          // Check if index already exists in schema definition
+          const existsInSchema = schema.indexes?.some((idx: any) => idx.name === indexName);
+
+          try {
+            // Check if index already exists in database
+            const indexExists = await sql`
+              SELECT EXISTS (
+                SELECT FROM pg_indexes
+                WHERE tablename = ${collectionName}
+                AND indexname = ${indexName}
+              )
+            `;
+
+            if (indexExists[0].exists && existsInSchema) {
+              result.skipped.push({
+                collection: collectionName,
+                indexName,
+                reason: 'Index already exists',
+              });
+              continue;
+            }
+
+            // Check if column exists
+            const columnExists = await sql`
+              SELECT EXISTS (
+                SELECT FROM information_schema.columns
+                WHERE table_name = ${collectionName}
+                AND column_name = ${fkColumn}
+              )
+            `;
+
+            if (!columnExists[0].exists) {
+              result.skipped.push({
+                collection: collectionName,
+                indexName,
+                reason: `Column ${fkColumn} does not exist`,
+              });
+              continue;
+            }
+
+            // Create the index in database if not exists
+            if (!indexExists[0].exists) {
+              const createIndexSQL = `CREATE INDEX "${indexName}" ON "${collectionName}" ("${fkColumn}")`;
+              await sql.unsafe(createIndexSQL);
+              console.log(`Created index ${indexName} on ${collectionName}(${fkColumn})`);
+            }
+
+            // Add to schema definition if not exists
+            if (!existsInSchema) {
+              newIndexes.push({
+                name: indexName,
+                fields: [fkColumn],
+                unique: false,
+              });
+            }
+
+            result.created.push({
+              collection: collectionName,
+              indexName,
+              field: fkColumn,
+            });
+          } catch (error: any) {
+            result.errors.push({
+              collection: collectionName,
+              indexName,
+              error: error.message,
+            });
+            console.error(`Failed to create index ${indexName}:`, error.message);
+          }
+        }
+      }
+
+      // Check for junction tables (M2M/M2A) and add individual FK indexes
+      if (schema.isJunction) {
+        // Find all FK columns in junction table (columns ending with _id)
+        for (const [fieldName, fieldDef] of Object.entries(schema.fields)) {
+          const field = fieldDef as any;
+          
+          // Skip if field definition is null/undefined
+          if (!field) continue;
+          
+          // Skip non-FK fields and primary keys
+          if (field.primaryKey || field.relType) continue;
+          
+          // Check if it's a FK column (ends with _id or is item_id for M2A)
+          if (fieldName.endsWith('_id') || fieldName === 'item_id') {
+            const indexName = `${collectionName}_${fieldName}_idx`;
+            const existsInSchema = schema.indexes?.some((idx: any) => idx.name === indexName);
+
+            try {
+              // Check if index already exists in database
+              const indexExists = await sql`
+                SELECT EXISTS (
+                  SELECT FROM pg_indexes
+                  WHERE tablename = ${collectionName}
+                  AND indexname = ${indexName}
+                )
+              `;
+
+              if (indexExists[0].exists && existsInSchema) {
+                result.skipped.push({
+                  collection: collectionName,
+                  indexName,
+                  reason: 'Index already exists',
+                });
+                continue;
+              }
+
+              // Create the index in database if not exists
+              if (!indexExists[0].exists) {
+                const createIndexSQL = `CREATE INDEX "${indexName}" ON "${collectionName}" ("${fieldName}")`;
+                await sql.unsafe(createIndexSQL);
+                console.log(`Created index ${indexName} on ${collectionName}(${fieldName})`);
+              }
+
+              // Add to schema definition if not exists
+              if (!existsInSchema) {
+                newIndexes.push({
+                  name: indexName,
+                  fields: [fieldName],
+                  unique: false,
+                });
+              }
+
+              result.created.push({
+                collection: collectionName,
+                indexName,
+                field: fieldName,
+              });
+            } catch (error: any) {
+              result.errors.push({
+                collection: collectionName,
+                indexName,
+                error: error.message,
+              });
+              console.error(`Failed to create index ${indexName}:`, error.message);
+            }
+          }
+        }
+
+        // Also add index on 'collection' column for M2A junction tables
+        if (schema.fields.collection) {
+          const indexName = `${collectionName}_collection_idx`;
+          const existsInSchema = schema.indexes?.some((idx: any) => idx.name === indexName);
+
+          try {
+            const indexExists = await sql`
+              SELECT EXISTS (
+                SELECT FROM pg_indexes
+                WHERE tablename = ${collectionName}
+                AND indexname = ${indexName}
+              )
+            `;
+
+            if (indexExists[0].exists && existsInSchema) {
+              result.skipped.push({
+                collection: collectionName,
+                indexName,
+                reason: 'Index already exists',
+              });
+            } else {
+              // Create the index in database if not exists
+              if (!indexExists[0].exists) {
+                const createIndexSQL = `CREATE INDEX "${indexName}" ON "${collectionName}" ("collection")`;
+                await sql.unsafe(createIndexSQL);
+                console.log(`Created index ${indexName} on ${collectionName}(collection)`);
+              }
+
+              // Add to schema definition if not exists
+              if (!existsInSchema) {
+                newIndexes.push({
+                  name: indexName,
+                  fields: ['collection'],
+                  unique: false,
+                });
+              }
+
+              result.created.push({
+                collection: collectionName,
+                indexName,
+                field: 'collection',
+              });
+            }
+          } catch (error: any) {
+            result.errors.push({
+              collection: collectionName,
+              indexName,
+              error: error.message,
+            });
+          }
+        }
+      }
+
+      // Track schemas that need updating
+      if (newIndexes.length > 0) {
+        schemasToUpdate.set(collectionName, { schema, newIndexes });
+      }
+    }
+
+    // Update schema definitions with new indexes
+    for (const [collectionName, { schema, newIndexes }] of schemasToUpdate) {
+      try {
+        const updatedSchema = { ...schema };
+        if (!updatedSchema.indexes) {
+          updatedSchema.indexes = [];
+        }
+        updatedSchema.indexes.push(...newIndexes);
+        
+        // Update the schema definition directly in the database
+        await sql`
+          UPDATE "baasix_SchemaDefinition"
+          SET schema = ${JSON.stringify(updatedSchema)}::jsonb,
+              "updatedAt" = NOW()
+          WHERE "collectionName" = ${collectionName}
+        `;
+        console.log(`Updated schema definition for ${collectionName} with ${newIndexes.length} new indexes`);
+      } catch (error: any) {
+        console.error(`Failed to update schema definition for ${collectionName}:`, error.message);
+        // Don't add to errors since the indexes were created successfully
+      }
+    }
+
+    console.log(`Index migration complete: ${result.created.length} created, ${result.skipped.length} skipped, ${result.errors.length} errors`);
+    return result;
+  }
 }
 
 /**

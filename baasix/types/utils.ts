@@ -12,6 +12,7 @@ export interface SchemaDefinition {
   collectionName: string;
   schema: {
     fields: Record<string, any>;
+    isJunction?: boolean; // True for M2M/M2A junction tables (system-generated)
     options?: {
       paranoid?: boolean;
       timestamps?: boolean;

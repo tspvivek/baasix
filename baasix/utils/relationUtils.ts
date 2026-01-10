@@ -372,7 +372,8 @@ export async function handleHasManyRelationship(
 
     // For junction tables or non-nullable foreign keys, delete the records
     // For nullable foreign keys, just set the FK to null (unlink)
-    const isJunctionTable = associationInfo.model.endsWith('_junction');
+    // Check both the schema property and name suffix for backward compatibility
+    const isJunctionTable = targetSchema?.isJunction === true || associationInfo.model.endsWith('_junction');
 
     if (isJunctionTable || !allowsNull) {
       await Promise.all(

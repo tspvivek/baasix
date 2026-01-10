@@ -877,6 +877,7 @@ POST /schemas/posts/relationships
   "alias": "posts"          // Reverse relation name on users (optional)
 }
 // Creates: posts.author_Id → baasix_User.id
+// Auto-creates index on author_Id for better query performance
 ```
 
 ### O2M (One-to-Many / HasMany)
@@ -894,8 +895,38 @@ POST /schemas/posts/relationships
   "name": "tags",
   "alias": "posts"
 }
-// Creates junction table: posts_tags_baasix
+// Creates junction table: posts_tags_tags_junction (auto-generated)
+// Junction table has isJunction: true in schema
+
+// With custom junction table name (useful for long collection names)
+POST /schemas/posts/relationships
+{
+  "type": "M2M",
+  "target": "tags",
+  "name": "tags",
+  "alias": "posts",
+  "through": "post_tags"    // Custom name (max 63 chars for PostgreSQL)
+}
 ```
+
+### M2A (Many-to-Any / Polymorphic)
+```javascript
+POST /schemas/comments/relationships
+{
+  "type": "M2A",
+  "name": "commentable",
+  "tables": ["posts", "products"],  // Can relate to multiple collections
+  "alias": "comments",
+  "through": "comment_refs"          // Optional custom junction table name
+}
+// Creates polymorphic junction table with collection column
+```
+
+### Junction Tables (M2M/M2A)
+- **Auto-generated name**: `{source}_{target}_{name}_junction`
+- **Custom name**: Use `through` property (max 63 characters for PostgreSQL)
+- **Schema property**: `isJunction: true` marks junction tables
+- **Auto-indexed**: All FK columns are automatically indexed
 
 ## Indexes
 

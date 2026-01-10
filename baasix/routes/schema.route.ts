@@ -264,6 +264,20 @@ const registerEndpoint = (app: Express, context?: any) => {
         return processedSchema;
     }
 
+    // PostgreSQL identifier max length (63 characters)
+    const PG_MAX_IDENTIFIER_LENGTH = 63;
+
+    // Validate identifier length for PostgreSQL
+    function validateIdentifierLength(name: string, type: string = 'Identifier'): void {
+        if (name.length > PG_MAX_IDENTIFIER_LENGTH) {
+            throw new APIError(
+                `${type} name too long`,
+                400,
+                `${type} name "${name}" exceeds PostgreSQL's ${PG_MAX_IDENTIFIER_LENGTH} character limit (${name.length} chars). Please use a shorter name.`
+            );
+        }
+    }
+
     app.post("/schemas", adminOnly, async (req, res, next) => {
         try {
             console.log("Creating new schema");
@@ -280,6 +294,9 @@ const registerEndpoint = (app: Express, context?: any) => {
                     "Collection name cannot be empty or end with _junction"
                 );
             }
+
+            // Validate collection name length
+            validateIdentifierLength(collectionName, 'Collection');
 
             // Insert into baasix_SchemaDefinition table
             const schemaDefTable = schemaManager.getTable("baasix_SchemaDefinition");
@@ -458,6 +475,29 @@ const registerEndpoint = (app: Express, context?: any) => {
             res.status(200).json({ message: "Index removed successfully" });
         } catch (error) {
             next(new APIError("Error removing index", 500, error.message));
+        }
+    });
+
+    // Add missing foreign key indexes to all collections (migration utility)
+    app.post("/schemas/indexes/migrate", adminOnly, async (req, res, next) => {
+        try {
+            console.log('Starting foreign key index migration...');
+            const result = await schemaManager.addMissingForeignKeyIndexes(req.accountability);
+            
+            // Invalidate schema definition cache after migration
+            await invalidateEntireCache('baasix_SchemaDefinition');
+
+            res.status(200).json({
+                message: "Foreign key index migration completed",
+                summary: {
+                    created: result.created.length,
+                    skipped: result.skipped.length,
+                    errors: result.errors.length,
+                },
+                details: result,
+            });
+        } catch (error) {
+            next(new APIError("Error migrating indexes", 500, error.message));
         }
     });
 
@@ -722,6 +762,20 @@ const registerEndpoint = (app: Express, context?: any) => {
                     SystemGenerated: true,
                 };
 
+                // Auto-create index on foreign key for better query performance
+                const m2oIndexName = `${sourceCollection}_${m2oForeignKey}_idx`;
+                if (!updatedSourceSchema.indexes) {
+                    updatedSourceSchema.indexes = [];
+                }
+                // Only add if index doesn't already exist
+                if (!updatedSourceSchema.indexes.some((idx: any) => idx.name === m2oIndexName)) {
+                    updatedSourceSchema.indexes.push({
+                        name: m2oIndexName,
+                        fields: [m2oForeignKey],
+                        unique: false,
+                    });
+                }
+
                 if (relationshipData.alias) {
                     if (isSelfReferential) {
                         updatedSourceSchema.fields[relationshipData.alias] = {
@@ -775,6 +829,20 @@ const registerEndpoint = (app: Express, context?: any) => {
                     SystemGenerated: true,
                 };
 
+                // Auto-create index on foreign key for better query performance
+                const o2oIndexName = `${sourceCollection}_${o2oForeignKey}_idx`;
+                if (!updatedSourceSchema.indexes) {
+                    updatedSourceSchema.indexes = [];
+                }
+                // Only add if index doesn't already exist
+                if (!updatedSourceSchema.indexes.some((idx: any) => idx.name === o2oIndexName)) {
+                    updatedSourceSchema.indexes.push({
+                        name: o2oIndexName,
+                        fields: [o2oForeignKey],
+                        unique: false,
+                    });
+                }
+
                 if (relationshipData.alias) {
                     if (isSelfReferential) {
                         updatedSourceSchema.fields[relationshipData.alias] = {
@@ -801,7 +869,11 @@ const registerEndpoint = (app: Express, context?: any) => {
                 break;
 
             case "M2M":
-                let through = `${sourceCollection}_${relationshipData.target}_${relationshipData.name}_junction`;
+                // Use custom junction table name if provided, otherwise generate default
+                const through = relationshipData.through || `${sourceCollection}_${relationshipData.target}_${relationshipData.name}_junction`;
+                
+                // Validate junction table name length
+                validateIdentifierLength(through, 'Junction table');
 
                 const sourceType = sourceSchema.fields.id.type;
                 const targetType = targetSchema.fields.id.type;
@@ -814,6 +886,7 @@ const registerEndpoint = (app: Express, context?: any) => {
 
                 const throughSchema = {
                     name: through,
+                    isJunction: true, // Mark this as a junction table for M2M relationships
                     fields: {
                         id: { type: "Integer", primaryKey: true, defaultValue: { type: "AUTOINCREMENT" } },
                         [sourceIdColumn]: { type: sourceType, allowNull: false, SystemGenerated: true },
@@ -843,6 +916,17 @@ const registerEndpoint = (app: Express, context?: any) => {
                             name: `${sourceCollection}_${relationshipData.target}_unique`,
                             fields: [sourceIdColumn, targetIdColumn],
                             unique: true,
+                        },
+                        // Individual indexes on each FK for better query performance
+                        {
+                            name: `${through}_${sourceIdColumn}_idx`,
+                            fields: [sourceIdColumn],
+                            unique: false,
+                        },
+                        {
+                            name: `${through}_${targetIdColumn}_idx`,
+                            fields: [targetIdColumn],
+                            unique: false,
                         },
                     ],
                 };
@@ -887,7 +971,11 @@ const registerEndpoint = (app: Express, context?: any) => {
                 break;
 
             case "M2A":
-                let throughTable = `${sourceCollection}_${relationshipData.name}_junction`;
+                // Use custom junction table name if provided, otherwise generate default
+                const throughTable = relationshipData.through || `${sourceCollection}_${relationshipData.name}_junction`;
+                
+                // Validate junction table name length
+                validateIdentifierLength(throughTable, 'Junction table');
 
                 //Check type of id in all target tables to ensure they are the same
                 const firstTableSchemaDoc = await getSchemaDefinition(relationshipData.tables[0], accountability);
@@ -911,6 +999,7 @@ const registerEndpoint = (app: Express, context?: any) => {
                 // Create through table schema
                 const throughSchemaM2A = {
                     name: throughTable,
+                    isJunction: true, // Mark this as a junction table for M2A relationships
                     fields: {
                         id: { type: "Integer", primaryKey: true, defaultValue: { type: "AUTOINCREMENT" } },
                         [`${sourceCollection}_id`]: {
@@ -943,6 +1032,22 @@ const registerEndpoint = (app: Express, context?: any) => {
                             name: `${sourceCollection}_${relationshipData.name}_unique`,
                             fields: [`${sourceCollection}_id`, "item_id", "collection"],
                             unique: true,
+                        },
+                        // Individual indexes on FK columns for better query performance
+                        {
+                            name: `${throughTable}_${sourceCollection}_id_idx`,
+                            fields: [`${sourceCollection}_id`],
+                            unique: false,
+                        },
+                        {
+                            name: `${throughTable}_item_id_idx`,
+                            fields: ["item_id"],
+                            unique: false,
+                        },
+                        {
+                            name: `${throughTable}_collection_idx`,
+                            fields: ["collection"],
+                            unique: false,
                         },
                     ],
                     timestamps: true,
