@@ -316,7 +316,19 @@ SECRET_KEY=your-secret-key-min-32-chars
 # Cache (optional - defaults to memory)
 # CACHE_ADAPTER=redis
 # CACHE_REDIS_URL=redis://localhost:6379
+
+# Real-time (optional)
+# SOCKET_ENABLED=true
+# SOCKET_REDIS_ENABLED=true        # For multi-instance
+# SOCKET_REDIS_URL=redis://localhost:6379
+
+# Background Tasks (optional)
+# TASK_SERVICE_ENABLED=true
+# TASK_REDIS_ENABLED=true          # For multi-instance
+# TASK_REDIS_URL=redis://localhost:6379
 ```
+
+> **Multi-Instance Deployments:** When running multiple instances (PM2 cluster, Kubernetes, etc.), enable Redis for Socket.IO and Tasks to ensure proper coordination. See the [Deployment Guide](https://baasix.com/docs/deployment-guide#multi-instance-deployment-scaling) for details.
 
 ### 6. Start the server
 

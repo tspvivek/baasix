@@ -5,6 +5,8 @@ import { schemaManager } from "../utils/schemaManager.js";
 import { eq, lte, and } from "drizzle-orm";
 import { hooksManager } from "./HooksManager.js";
 import type { Task } from '../types/index.js';
+import Redis from "ioredis";
+import crypto from "crypto";
 
 class TasksService {
   private cache: any = null;
@@ -13,6 +15,14 @@ class TasksService {
   private refreshInterval: number = 0;
   private refreshIntervalId: NodeJS.Timeout | null = null;
   private initialized: boolean = false;
+  
+  // Redis-based distributed locking (separate from cache)
+  private redisClient: Redis | null = null;
+  private useTaskRedis: boolean = false;
+  private instanceId: string = crypto.randomUUID();
+  private lockRenewalInterval: NodeJS.Timeout | null = null;
+  private static readonly LOCK_TTL_SECONDS = 60; // Lock expires after 60 seconds
+  private static readonly LOCK_RENEWAL_INTERVAL = 20000; // Renew lock every 20 seconds
 
   async init(): Promise<void> {
     if (this.initialized) {
@@ -28,6 +38,17 @@ class TasksService {
 
     try {
       this.cache = getCache();
+
+      // Initialize Redis for distributed locking if enabled
+      this.useTaskRedis = env.get("TASK_REDIS_ENABLED") === "true";
+      const taskRedisUrl = env.get("TASK_REDIS_URL");
+      
+      if (this.useTaskRedis && taskRedisUrl) {
+        this.redisClient = new Redis(taskRedisUrl);
+        console.info(`TasksService: Redis enabled for distributed locking (instance: ${this.instanceId.slice(0, 8)})`);
+      } else {
+        console.info("TasksService: Single instance mode (no Redis for distributed locking)");
+      }
 
       // Set refresh interval from ENV with maximum of 3 hours (10800 seconds)
       const envInterval = parseInt(env.get("TASK_LIST_REFRESH_INTERVAL") || "600");
@@ -147,11 +168,17 @@ class TasksService {
   /**
    * Try to acquire a distributed lock for task processing
    * This ensures only one instance processes tasks at a time
-   * Uses Redis SETNX for atomic lock acquisition
-   * @param lockTimeout - Lock expiration time in seconds (default: 300 = 5 minutes)
+   * 
+   * In multi-instance mode (TASK_REDIS_ENABLED=true):
+   *   Uses Redis SETNX for atomic lock acquisition
+   * 
+   * In single-instance mode:
+   *   Falls back to cache-based locking
+   * 
+   * @param lockTimeout - Lock expiration time in seconds (default: 60 seconds)
    * @returns True if lock acquired, false otherwise
    */
-  async tryAcquireLock(lockTimeout: number = 300): Promise<boolean> {
+  async tryAcquireLock(lockTimeout: number = TasksService.LOCK_TTL_SECONDS): Promise<boolean> {
     await this.ensureInitialized();
     if (!this.initialized) {
       console.warn("TasksService: Cannot acquire lock - initialization failed");
@@ -159,17 +186,38 @@ class TasksService {
     }
 
     try {
-      // Try to acquire lock atomically using Redis SETNX
-      // Only one instance will succeed
+      // Multi-instance mode: Use Redis for distributed locking
+      if (this.useTaskRedis && this.redisClient) {
+        // Try to acquire lock atomically using Redis SETNX
+        const lockKey = `baasix:task_lock`;
+        const result = await this.redisClient.set(
+          lockKey,
+          this.instanceId,
+          "EX", lockTimeout,
+          "NX"
+        );
+
+        if (result === "OK") {
+          console.info(`TasksService: Lock acquired via Redis (instance: ${this.instanceId.slice(0, 8)}, expires in ${lockTimeout}s)`);
+          // Start lock renewal to prevent expiry during long-running tasks
+          this.startLockRenewal();
+          return true;
+        }
+
+        // Lock already held by another instance
+        console.info("TasksService: Lock already held by another instance");
+        return false;
+      }
+
+      // Single-instance mode: Use cache-based locking
       const lockAcquired = await this.cache.tryLock(this.taskRunningKey, lockTimeout);
 
       if (lockAcquired) {
-        console.info(`TasksService: Lock acquired successfully (expires in ${lockTimeout}s)`);
+        console.info(`TasksService: Lock acquired via cache (expires in ${lockTimeout}s)`);
         return true;
       }
 
-      // Lock already held by another instance
-      console.info("TasksService: Lock already held by another instance");
+      console.info("TasksService: Lock already held");
       return false;
     } catch (error: any) {
       console.error("TasksService: Error acquiring lock:", error);
@@ -178,7 +226,44 @@ class TasksService {
   }
 
   /**
+   * Start automatic lock renewal to prevent expiry during long-running tasks
+   */
+  private startLockRenewal(): void {
+    this.stopLockRenewal();
+    
+    this.lockRenewalInterval = setInterval(async () => {
+      if (this.useTaskRedis && this.redisClient) {
+        const lockKey = `baasix:task_lock`;
+        try {
+          // Only renew if we still own the lock
+          const currentHolder = await this.redisClient.get(lockKey);
+          if (currentHolder === this.instanceId) {
+            await this.redisClient.expire(lockKey, TasksService.LOCK_TTL_SECONDS);
+            console.info(`TasksService: Lock renewed (instance: ${this.instanceId.slice(0, 8)})`);
+          } else {
+            // We lost the lock, stop renewal
+            this.stopLockRenewal();
+          }
+        } catch (error: any) {
+          console.error("TasksService: Error renewing lock:", error.message);
+        }
+      }
+    }, TasksService.LOCK_RENEWAL_INTERVAL);
+  }
+
+  /**
+   * Stop lock renewal interval
+   */
+  private stopLockRenewal(): void {
+    if (this.lockRenewalInterval) {
+      clearInterval(this.lockRenewalInterval);
+      this.lockRenewalInterval = null;
+    }
+  }
+
+  /**
    * Release the distributed lock
+   * Only releases if the current instance owns the lock
    * @returns True if lock released, false otherwise
    */
   async releaseLock(): Promise<boolean> {
@@ -189,8 +274,35 @@ class TasksService {
     }
 
     try {
+      // Stop lock renewal
+      this.stopLockRenewal();
+
+      // Multi-instance mode: Use Redis
+      if (this.useTaskRedis && this.redisClient) {
+        const lockKey = `baasix:task_lock`;
+        
+        // Only delete if we own the lock (atomic check-and-delete using Lua)
+        const luaScript = `
+          if redis.call("get", KEYS[1]) == ARGV[1] then
+            return redis.call("del", KEYS[1])
+          else
+            return 0
+          end
+        `;
+        const result = await this.redisClient.eval(luaScript, 1, lockKey, this.instanceId);
+        
+        if (result === 1) {
+          console.info(`TasksService: Lock released via Redis (instance: ${this.instanceId.slice(0, 8)})`);
+          return true;
+        } else {
+          console.info("TasksService: Lock not owned by this instance, nothing to release");
+          return false;
+        }
+      }
+
+      // Single-instance mode: Use cache
       await this.cache.unlock(this.taskRunningKey);
-      console.info("TasksService: Lock released successfully");
+      console.info("TasksService: Lock released via cache");
       return true;
     } catch (error: any) {
       console.error("TasksService: Error releasing lock:", error);
@@ -279,6 +391,19 @@ class TasksService {
     // Stop periodic refresh
     this.stopPeriodicRefresh();
 
+    // Stop lock renewal
+    this.stopLockRenewal();
+
+    // Release any held lock
+    await this.releaseLock();
+
+    // Close Redis connection if open
+    if (this.redisClient) {
+      await this.redisClient.quit();
+      this.redisClient = null;
+      console.info("TasksService: Redis connection closed");
+    }
+
     console.info("TasksService: Shutdown completed");
   }
 
@@ -318,6 +443,8 @@ class TasksService {
         taskTimeWindow: "4 hours",
         initialized: this.initialized,
         lastRefreshed: new Date().toISOString(),
+        distributedMode: this.useTaskRedis,
+        instanceId: this.instanceId.slice(0, 8),
       };
     } catch (error: any) {
       console.error("TasksService: Error getting cache stats:", error);

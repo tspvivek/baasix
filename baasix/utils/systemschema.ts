@@ -682,6 +682,10 @@ export const systemSchemas = {
             schema: {
                 name: "Notification",
                 timestamps: true,
+                realtime: {
+                    enabled: true,
+                    actions: ["insert", "update", "delete"]
+                },
                 fields: {
                     id: {
                         type: "UUID",

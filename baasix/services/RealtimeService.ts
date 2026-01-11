@@ -50,6 +50,9 @@ export interface RealtimeConfig {
 // Constants
 const PUBLICATION_NAME = 'baasix_realtime';
 const SLOT_NAME = 'baasix_realtime_slot';
+// Redis key for WAL consumer leader election
+const WAL_LEADER_KEY = 'baasix:wal:leader';
+const WAL_LEADER_TTL = 30; // seconds
 
 /**
  * Custom PgoutputPlugin that doesn't send the 'messages' option
@@ -100,6 +103,14 @@ class RealtimeService {
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private shuttingDown: boolean = false;
   private walAvailable: boolean = false;
+  // Whether this instance is the WAL consumer leader
+  private isWalLeader: boolean = false;
+  // Unique instance ID for Redis leader election
+  private instanceId: string = `${process.pid}-${Date.now()}`;
+  // Redis client for leader election
+  private redisClient: any = null;
+  // Leader lock renewal interval
+  private leaderRenewalInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     console.info("Realtime Service instance created");
@@ -390,9 +401,34 @@ class RealtimeService {
       return;
     }
 
+    // Check if WAL consumer is explicitly disabled via environment variable
+    if (env.get("REALTIME_WAL_CONSUMER_ENABLED") === "false") {
+      console.info("WAL consumer explicitly disabled via REALTIME_WAL_CONSUMER_ENABLED=false");
+      return;
+    }
+
     if (this.connected) {
       console.warn("Already consuming WAL changes");
       return;
+    }
+
+    // Multi-instance mode: Use Redis for leader election
+    // Only one instance should consume WAL to avoid duplicate processing
+    if (env.get("SOCKET_REDIS_ENABLED") === "true") {
+      const isLeader = await this.tryBecomeWalLeader();
+      if (!isLeader) {
+        console.info("Another instance is the WAL consumer leader. This instance will not consume WAL.");
+        console.info("Realtime broadcasts will still work via Redis adapter.");
+        this.isWalLeader = false;
+        return;
+      }
+      this.isWalLeader = true;
+      this.startLeaderRenewal();
+      console.info("This instance became the WAL consumer leader");
+    } else {
+      // Single instance mode - no Redis, this instance is the leader
+      this.isWalLeader = true;
+      console.info("Single instance mode - this instance will consume WAL");
     }
 
     try {
@@ -433,8 +469,135 @@ class RealtimeService {
       console.info("✅ Started consuming WAL changes");
 
     } catch (error: any) {
+      // Check if this is a "slot already active" error
+      const errorMsg = error.message?.toLowerCase() || '';
+      if (errorMsg.includes('is active for pid') || error.code === '55006') {
+        console.warn("WAL replication slot is already active on another connection");
+        this.isWalLeader = false;
+        this.stopLeaderRenewal();
+        await this.releaseWalLeaderLock();
+        return;
+      }
       console.error("Failed to start WAL consumer:", error);
       throw error;
+    }
+  }
+
+  /**
+   * Try to become the WAL consumer leader using Redis
+   * Uses SETNX with TTL - only one instance can hold the key
+   */
+  private async tryBecomeWalLeader(): Promise<boolean> {
+    try {
+      const redis = await this.getRedisClient();
+      if (!redis) return true; // No Redis = single instance mode
+
+      // Try to set the key only if it doesn't exist (NX), with TTL
+      const result = await redis.set(WAL_LEADER_KEY, this.instanceId, 'EX', WAL_LEADER_TTL, 'NX');
+      return result === 'OK';
+    } catch (error: any) {
+      console.warn(`Failed to acquire WAL leader via Redis: ${error.message}`);
+      // On Redis error, allow this instance to consume WAL (fallback to single-instance behavior)
+      return true;
+    }
+  }
+
+  /**
+   * Start periodic renewal of leader lock
+   */
+  private startLeaderRenewal(): void {
+    if (this.leaderRenewalInterval) return;
+
+    // Renew every 10 seconds (TTL is 30s, so we have buffer)
+    this.leaderRenewalInterval = setInterval(async () => {
+      try {
+        const redis = await this.getRedisClient();
+        if (!redis) return;
+
+        // Only renew if we're still the leader
+        const currentLeader = await redis.get(WAL_LEADER_KEY);
+        if (currentLeader === this.instanceId) {
+          await redis.expire(WAL_LEADER_KEY, WAL_LEADER_TTL);
+        } else if (currentLeader) {
+          // Lost leadership to another instance
+          console.warn("Lost WAL consumer leadership to another instance");
+          this.isWalLeader = false;
+          this.stopLeaderRenewal();
+        }
+      } catch (error: any) {
+        console.warn(`Failed to renew WAL leader lock: ${error.message}`);
+      }
+    }, 10000);
+  }
+
+  /**
+   * Stop leader renewal interval
+   */
+  private stopLeaderRenewal(): void {
+    if (this.leaderRenewalInterval) {
+      clearInterval(this.leaderRenewalInterval);
+      this.leaderRenewalInterval = null;
+    }
+  }
+
+  /**
+   * Release WAL leader lock in Redis
+   */
+  private async releaseWalLeaderLock(): Promise<void> {
+    try {
+      const redis = await this.getRedisClient();
+      if (!redis) return;
+
+      // Only delete if we're the current leader (atomic check-and-delete)
+      const currentLeader = await redis.get(WAL_LEADER_KEY);
+      if (currentLeader === this.instanceId) {
+        await redis.del(WAL_LEADER_KEY);
+        console.info("Released WAL consumer leadership");
+      }
+    } catch (error: any) {
+      console.warn(`Failed to release WAL leader lock: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get or create Redis client for leader election
+   * Reuses the same Redis URL as Socket.IO
+   */
+  private async getRedisClient(): Promise<any> {
+    if (env.get("SOCKET_REDIS_ENABLED") !== "true") {
+      return null;
+    }
+
+    if (this.redisClient) {
+      return this.redisClient;
+    }
+
+    try {
+      const Redis = (await import('ioredis')).default;
+      const redisUrl = env.get("SOCKET_REDIS_URL");
+      if (!redisUrl) {
+        console.warn("SOCKET_REDIS_URL not set, cannot use Redis for WAL leader election");
+        return null;
+      }
+
+      this.redisClient = new Redis(redisUrl, {
+        maxRetriesPerRequest: 3,
+        lazyConnect: true,
+        retryStrategy: (times: number) => {
+          if (times > 3) return null; // Stop retrying
+          return Math.min(times * 100, 1000);
+        },
+      });
+
+      this.redisClient.on('error', (err: Error) => {
+        console.warn(`Redis client error (WAL leader): ${err.message}`);
+      });
+
+      await this.redisClient.connect();
+      return this.redisClient;
+    } catch (error: any) {
+      console.warn(`Failed to create Redis client: ${error.message}`);
+      return null;
     }
   }
 
@@ -515,16 +678,26 @@ class RealtimeService {
       return;
     }
 
-    // Attempt to reconnect after delay
+    // Only the leader should attempt reconnection
+    if (!this.isWalLeader) {
+      return;
+    }
+
+    // Single reconnect attempt after 5 seconds
     if (!this.reconnectTimeout) {
       console.info("Realtime connection lost. Attempting reconnect in 5 seconds...");
       this.reconnectTimeout = setTimeout(async () => {
         this.reconnectTimeout = null;
         try {
+          // Reset connected state and try again
           await this.startConsuming();
         } catch (error) {
           console.error("Reconnection failed:", error);
-          this.handleDisconnect(); // Try again
+          // Release leadership so another instance can try
+          this.stopLeaderRenewal();
+          await this.releaseWalLeaderLock();
+          this.isWalLeader = false;
+          console.info("Released WAL leadership after reconnection failure");
         }
       }, 5000);
     }
@@ -829,6 +1002,7 @@ class RealtimeService {
     initialized: boolean;
     connected: boolean;
     walAvailable: boolean;
+    isWalLeader: boolean;
     enabledCollections: Array<{ collection: string; config: RealtimeConfig }>;
     publicationName: string;
     slotName: string;
@@ -837,6 +1011,7 @@ class RealtimeService {
       initialized: this.initialized,
       connected: this.connected,
       walAvailable: this.walAvailable,
+      isWalLeader: this.isWalLeader,
       enabledCollections: this.getEnabledCollections(),
       publicationName: PUBLICATION_NAME,
       slotName: SLOT_NAME
@@ -855,6 +1030,15 @@ class RealtimeService {
       this.reconnectTimeout = null;
     }
 
+    // Stop leader renewal interval
+    this.stopLeaderRenewal();
+
+    // Release WAL leader lock if we held it
+    if (this.isWalLeader) {
+      await this.releaseWalLeaderLock();
+      this.isWalLeader = false;
+    }
+
     if (this.replicationService) {
       try {
         await this.replicationService.stop();
@@ -862,6 +1046,16 @@ class RealtimeService {
         console.warn("Error stopping replication service:", error);
       }
       this.replicationService = null;
+    }
+
+    // Cleanup Redis client
+    if (this.redisClient) {
+      try {
+        await this.redisClient.quit();
+      } catch (error) {
+        // Ignore
+      }
+      this.redisClient = null;
     }
 
     this.connected = false;
