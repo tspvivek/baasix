@@ -48,6 +48,9 @@ const registerEndpoint = (app: Express) => {
     fileUpload({ limits: { fileSize: 50 * 1024 * 1024 } }),
     async (req: any, res, next) => {
       try {
+        if (!req.files || !req.files.file) {
+          return res.status(400).json({ message: "No file uploaded. Please provide a file with the field name 'file'." });
+        }
         const file = req.files.file;
         const metadata = {
           ...req.body,

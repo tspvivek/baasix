@@ -2309,7 +2309,12 @@ export class ItemsService {
       throw new APIError("Item not found or you don't have permission to update it", 403);
     }
 
-    const existingItem = existingItems[0];
+    // When there are joins, Drizzle returns results in nested format: { tableName: { ...data }, joinedTable: { ...data } }
+    // Extract the main table's data when joins are present
+    let existingItem = existingItems[0];
+    if (filterJoins.length > 0 && existingItem[this.collection]) {
+      existingItem = existingItem[this.collection];
+    }
 
     // Ensure tenant_Id cannot be changed (except by admin)
     if (
